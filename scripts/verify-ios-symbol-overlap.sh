@@ -3,8 +3,8 @@
 # every global-scope name in it is std::, JSI/React, a builtin or ThreadPool, or
 # it is a clang block helper or an ObjC protocol record.
 # Both archives link into one executable, where hidden visibility does not keep
-# two definitions apart: the linker errors on strong pairs and silently picks
-# one of a weak pair.
+# two definitions apart: the linker keeps one of each pair, with at most a
+# warning.
 set -uo pipefail
 
 if [ "$#" -ne 2 ]; then
