@@ -25,10 +25,13 @@ const CHECKS = {
   exe: 'executable',
   sources: 'llama.rn kernel sources found in node_modules',
   metallib: 'rnllama.metallib at the .app root',
+  whisperMetallib: 'default.metallib at the .app root',
   kernels: "kernels/ matches llama.rn's ggml-metal/kernels",
   implHeader: 'ggml-metal-impl.h at the .app root',
   commonHeader: 'ggml-common.h at the .app root',
-  onlyRnllama: 'no .metallib other than rnllama.metallib at the .app root',
+  onlyKnown:
+    'no .metallib other than rnllama.metallib and default.metallib at the .app root',
+  noWhisperFramework: 'no Frameworks/rnwhisper.framework in the .app',
   notEmbedded: 'no __ggml_metallib section in the executable',
   marker: 'core patch marker _rnllama_patch_abort_v3 in the executable',
 };
@@ -63,6 +66,7 @@ function makeApp(name = 'PocketPal.app') {
   fs.mkdirSync(app);
   fs.writeFileSync(path.join(app, 'PocketPal'), 'exe');
   fs.writeFileSync(path.join(app, 'rnllama.metallib'), 'metallib');
+  fs.writeFileSync(path.join(app, 'default.metallib'), 'metallib');
   fs.cpSync(KERNELS, path.join(app, 'kernels'), {recursive: true});
   for (const header of HEADERS) {
     fs.copyFileSync(header, path.join(app, path.basename(header)));
@@ -139,15 +143,23 @@ describe('the precompiled library', () => {
     expect(result.status).toBe(1);
   });
 
+  it('fails when default.metallib is missing', () => {
+    const app = makeApp();
+    fs.rmSync(path.join(app, 'default.metallib'));
+    const result = run([app]);
+    expect(result.failed).toEqual(['whisperMetallib']);
+    expect(result.status).toBe(1);
+  });
+
   it.each([
-    'default.metallib',
     'rnllama-tensor.metallib',
     'ggml-tensor.metallib',
-  ])('fails on %s beside it, and names it', extra => {
+    'whisper.metallib',
+  ])('fails on %s beside them, and names it', extra => {
     const app = makeApp();
     fs.writeFileSync(path.join(app, extra), 'metallib');
     const result = run([app]);
-    expect(result.failed).toEqual(['onlyRnllama']);
+    expect(result.failed).toEqual(['onlyKnown']);
     expect(result.stderr).toContain(`unexpected ${extra}`);
     expect(result.status).toBe(1);
   });
@@ -156,11 +168,31 @@ describe('the precompiled library', () => {
     const app = makeApp();
     fs.renameSync(
       path.join(app, 'rnllama.metallib'),
-      path.join(app, 'default.metallib'),
+      path.join(app, 'rnllama-tensor.metallib'),
     );
     const result = run([app]);
-    expect(result.failed).toEqual(['metallib', 'onlyRnllama']);
+    expect(result.failed).toEqual(['metallib', 'onlyKnown']);
     expect(result.status).toBe(1);
+  });
+});
+
+describe('whisper.rn', () => {
+  it('fails on a Frameworks/rnwhisper.framework', () => {
+    const app = makeApp();
+    fs.mkdirSync(path.join(app, 'Frameworks', 'rnwhisper.framework'), {
+      recursive: true,
+    });
+    const result = run([app]);
+    expect(result.failed).toEqual(['noWhisperFramework']);
+    expect(result.status).toBe(1);
+  });
+
+  it('passes with other frameworks in Frameworks/', () => {
+    const app = makeApp();
+    fs.mkdirSync(path.join(app, 'Frameworks', 'hermes.framework'), {
+      recursive: true,
+    });
+    expect(run([app]).failed).toEqual([]);
   });
 });
 

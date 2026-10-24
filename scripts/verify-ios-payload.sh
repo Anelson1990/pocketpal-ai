@@ -1,7 +1,8 @@
 #!/bin/bash
 # Checks that an iOS .app carries both of llama.rn's Metal delivery paths where
 # ggml looks them up (rnllama.metallib, and the kernel sources tensor GPUs
-# compile), and no .metallib that whisper.rn would load in their place.
+# compile), whisper.rn's default.metallib (without it whisper.rn compiles
+# llama.rn's kernel sources), no other .metallib, and no rnwhisper.framework.
 set -uo pipefail
 
 usage() {
@@ -48,11 +49,11 @@ root_copy_matches() {
   llama_rn_sources_found && cmp -s "$1" "$app/$(basename "$1")"
 }
 
-only_rnllama_metallib() {
+only_known_metallibs() {
   local lib extra=0
   for lib in "$app"/*.metallib; do
     [ -e "$lib" ] || continue
-    if [ "$(basename "$lib")" != rnllama.metallib ]; then
+    if [ "$(basename "$lib")" != rnllama.metallib ] && [ "$(basename "$lib")" != default.metallib ]; then
       echo "  unexpected $(basename "$lib")" >&2
       extra=1
     fi
@@ -78,10 +79,12 @@ check "app bundle $app" test -d "$app"
 check "executable $exe" test -f "$exe"
 check "llama.rn kernel sources found in node_modules" llama_rn_sources_found
 check "rnllama.metallib at the .app root" test -f "$app/rnllama.metallib"
+check "default.metallib at the .app root" test -f "$app/default.metallib"
 check "kernels/ matches llama.rn's ggml-metal/kernels" kernel_sources_match
 check "ggml-metal-impl.h at the .app root" root_copy_matches "$ggml_metal/ggml-metal-impl.h"
 check "ggml-common.h at the .app root" root_copy_matches "$ggml_src/ggml-common.h"
-check "no .metallib other than rnllama.metallib at the .app root" only_rnllama_metallib
+check "no .metallib other than rnllama.metallib and default.metallib at the .app root" only_known_metallibs
+check "no Frameworks/rnwhisper.framework in the .app" test ! -e "$app/Frameworks/rnwhisper.framework"
 check "no __ggml_metallib section in the executable" no_embedded_library
 if $require_marker; then
   check "core patch marker _rnllama_patch_abort_v3 in the executable" has_core_marker
