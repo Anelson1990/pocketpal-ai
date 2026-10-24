@@ -73,10 +73,10 @@ index 46bec1f..78b842c 100644
      // (Rust via whisper-rs, Go via cgo, ...). whisper_model_load can throw
      // (std::runtime_error here; vk::SystemError from the Vulkan backend during
 diff --git a/node_modules/whisper.rn/whisper-rn.podspec b/node_modules/whisper.rn/whisper-rn.podspec
-index e24aa83..b13f14c 100644
+index e24aa83..ea6efde 100644
 --- a/node_modules/whisper.rn/whisper-rn.podspec
 +++ b/node_modules/whisper.rn/whisper-rn.podspec
-@@ -38,13 +38,13 @@ Pod::Spec.new do |s|
+@@ -38,13 +38,15 @@ Pod::Spec.new do |s|
    if ENV["RNWHISPER_BUILD_FROM_SOURCE"] == "1"
      s.source_files = "ios/**/*.{h,m,mm}", "cpp/**/*.{h,cpp,hpp,c,m,mm}"
      s.exclude_files = "cpp/ggml-metal/*.m"
@@ -91,7 +91,9 @@ index e24aa83..b13f14c 100644
 +      " -Ddl_load_library=rnwhisper_dl_load_library" +
 +      " -Ddl_get_sym=rnwhisper_dl_get_sym" +
 +      " -Ddl_error=rnwhisper_dl_error" +
-+      " -Ddl_handle_deleter=rnwhisper_dl_handle_deleter"
++      " -Ddl_handle_deleter=rnwhisper_dl_handle_deleter" +
++      " -Dnode_info=rnwhisper_node_info" +
++      " -Dcmp_top_k=rnwhisper_cmp_top_k"
 +    ["cpp", "cpp/ggml-cpu", "cpp/coreml", "cpp/jsi"].each { |dir| header_search_paths << "\"$(PODS_TARGET_SRCROOT)/#{dir}\"" }
  
      s.subspec "no-require-arc" do |ss|
