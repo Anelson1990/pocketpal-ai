@@ -126,7 +126,7 @@ describe('the launch-time Metal gate', () => {
 
   it('runs before anything else at launch', () => {
     expect(launchBody).not.toBeNull();
-    expect(launchBody[1].trim()).toBe('keepLlamaOffUnsupportedMetal()');
+    expect(launchBody[1].trim()).toBe('configureGgmlMetal()');
   });
 
   it('turns llama.rn Metal off through the env ggml reads', () => {
@@ -145,7 +145,7 @@ describe('the Metal gate logic', () => {
     /func disablesLlamaMetal\(iOS18OrLater: Bool, supportsApple6: Bool\) -> Bool \{\s*([^}]*?)\s*\}/,
   );
   const launchGate = appDelegate.match(
-    /func keepLlamaOffUnsupportedMetal\(\) \{([\s\S]*?)\n {2}\}/,
+    /func configureGgmlMetal\(\) \{([\s\S]*?)\n {2}\}/,
   );
 
   it('finds the predicate and the launch gate', () => {
@@ -171,8 +171,9 @@ describe('the Metal gate logic', () => {
     },
   );
 
-  it('is only the iOS check, the Apple6 probe on iOS 18 and later, and the setenv', () => {
+  it("is only whisper's tensor opt-out, the iOS check, the Apple6 probe on iOS 18 and later, and the setenvs", () => {
     expect(launchGate[1].trim().split(/\s*\n\s*/)).toEqual([
+      'setenv("WSP_GGML_METAL_TENSOR_DISABLE", "1", 1)',
       'var iOS18OrLater = false',
       'if #available(iOS 18.0, *) {',
       'iOS18OrLater = true',
@@ -180,6 +181,7 @@ describe('the Metal gate logic', () => {
       'let supportsApple6 = iOS18OrLater && (MTLCreateSystemDefaultDevice()?.supportsFamily(.apple6) ?? false)',
       'if disablesLlamaMetal(iOS18OrLater: iOS18OrLater, supportsApple6: supportsApple6) {',
       'setenv("GGML_METAL_DEVICES", "0", 1)',
+      'setenv("WSP_GGML_METAL_DEVICES", "0", 1)',
       '}',
     ]);
   });
