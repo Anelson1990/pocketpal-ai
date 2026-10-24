@@ -1,6 +1,7 @@
 #!/bin/bash
-# Fails when two static archives both define a symbol, weak or strong, other
-# than a third-party header instantiation (std::, JSI/React) or ThreadPool.
+# Fails when two static archives both define a symbol, weak or strong, unless
+# every global-scope name in it is std::, JSI/React, a builtin or ThreadPool, or
+# it is a clang block helper or an ObjC protocol record.
 # Both archives link into one executable, where hidden visibility does not keep
 # two definitions apart: the linker errors on strong pairs and silently picks
 # one of a weak pair.
@@ -71,18 +72,49 @@ if [ "$(wc -l <"$tmp/demangled")" -ne "$(wc -l <"$tmp/shared")" ]; then
 fi
 
 paste "$tmp/demangled" "$tmp/shared" | awk -F '\t' '
-  function allowed(name,   base) {
-    base = name
-    if (index(base, "vtable for ") == 1) base = substr(base, 12)
-    else if (index(base, "typeinfo name for ") == 1) base = substr(base, 19)
-    else if (index(base, "typeinfo for ") == 1) base = substr(base, 14)
-    else if (index(base, "guard variable for ") == 1) base = substr(base, 20)
-    if (base == "ThreadPool" || index(base, "ThreadPool::") == 1) return 1
-    if (tolower(base) ~ /ggml|whisper|llama|dl_/) return 0
-    return base == "__clang_call_terminate" ||
-      index(base, "std::") == 1 ||
-      index(base, "facebook::jsi::") == 1 ||
-      index(base, "facebook::react::") == 1
+  BEGIN {
+    split("construction vtable for |vtable for |VTT for |typeinfo name for |typeinfo for |guard variable for |virtual thunk to |non-virtual thunk to ", descriptor, "|")
+    split("__block_descriptor_ __copy_helper_block_ __destroy_helper_block_ _OBJC_PROTOCOL_$_ _OBJC_LABEL_PROTOCOL_$_", compiler_record, " ")
+    split("void bool char wchar_t char8_t char16_t char32_t short int long signed unsigned float double __int128 const volatile operator new delete true false nullptr decltype auto noexcept __mbstate_t ThreadPool __clang_call_terminate", global, " ")
+    for (i in global) global_name[global[i]] = 1
+  }
+  function drop_abi_tags(s,   start, span) {
+    while ((start = index(s, "[abi:")) > 0 && (span = index(substr(s, start), "]")) > 0) {
+      s = substr(s, 1, start - 1) substr(s, start + span)
+    }
+    return s
+  }
+  function allowed(name,   s, i, n, start, word, rest) {
+    if (tolower(name) ~ /ggml|whisper|llama|dl_/) return 0
+    for (i in compiler_record) if (index(name, compiler_record[i]) == 1) return 1
+    s = name
+    for (i = 1; i in descriptor; i++) {
+      if (index(s, descriptor[i]) != 1) continue
+      s = substr(s, length(descriptor[i]) + 1)
+      if (descriptor[i] == "construction vtable for ") sub(/-in-/, " ", s)
+      break
+    }
+    s = drop_abi_tags(s)
+    n = length(s)
+    for (i = 1; i <= n;) {
+      if (substr(s, i, 1) ~ /[0-9]/) {
+        while (i <= n && substr(s, i, 1) ~ /[0-9A-Za-z_]/) i++
+        continue
+      }
+      if (substr(s, i, 1) !~ /[A-Za-z_$]/) { i++; continue }
+      start = i
+      while (i <= n && substr(s, i, 1) ~ /[0-9A-Za-z_$]/) i++
+      if (substr(s, 1, start - 1) ~ /::~?$/) continue
+      word = substr(s, start, i - start)
+      rest = substr(s, i)
+      if (index(rest, "::") != 1) {
+        if (!(word in global_name)) return 0
+      } else if (word != "std" && word != "ThreadPool" &&
+        !(word == "facebook" && (index(rest, "::jsi::") == 1 || index(rest, "::react::") == 1))) {
+        return 0
+      }
+    }
+    return 1
   }
   {
     verdict = allowed($1) ? "ALLOW" : "DENY"
