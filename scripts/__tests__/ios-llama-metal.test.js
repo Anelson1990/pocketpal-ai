@@ -24,6 +24,10 @@ const podspec = fs.readFileSync(
   path.join(LLAMA_RN, 'llama-rn.podspec'),
   'utf-8',
 );
+const whisperPodspec = fs.readFileSync(
+  path.join(ROOT, 'node_modules', 'whisper.rn', 'whisper-rn.podspec'),
+  'utf-8',
+);
 const metalDevice = fs.readFileSync(
   path.join(GGML_METAL, 'ggml-metal-device.m'),
   'utf-8',
@@ -333,5 +337,57 @@ describe('the app project settings pod install writes', () => {
       includes.indexOf(`${llamaCpp}/ggml/src/ggml-cpu`),
     );
     expect(flagged[0][2]).not.toMatch(/\/Users\/|\/home\//);
+  });
+});
+
+describe('ggml header resolution in the llama-rn and whisper-rn pods', () => {
+  const helper = podfile.match(
+    /^def resolve_ggml_headers_by_search_path\(installer\)\n([\s\S]*?)^end$/m,
+  );
+  const postInstall = podfile.match(
+    /post_install do \|installer\|([\s\S]*?)\n {2}end/,
+  );
+
+  it('finds the helper and post_install', () => {
+    expect(helper).not.toBeNull();
+    expect(postInstall).not.toBeNull();
+  });
+
+  it('turns header maps off in every configuration of exactly the two ggml pods', () => {
+    const targets = [...helper[1].matchAll(/^ {4}'([\w-]+)' => \[/gm)].map(
+      match => match[1],
+    );
+    expect(targets).toEqual(['llama-rn', 'whisper-rn']);
+    expect(helper[1]).toMatch(
+      /target\.build_configurations\.each do \|config\|\s*config\.build_settings\['USE_HEADERMAP'\] = 'NO'/,
+    );
+    expect(helper[1]).toMatch(
+      /raise Pod::Informative, "#\{name\} pod target not found"/,
+    );
+    expect(postInstall[1]).toMatch(
+      /^\s*resolve_ggml_headers_by_search_path\(installer\)$/m,
+    );
+  });
+
+  it('gives llama-rn the two directories only its header map supplied, after the inherited ones', () => {
+    expect(helper[1]).toContain(
+      `'"$(PODS_TARGET_SRCROOT)/vendor/llama.cpp/vendor/nlohmann"'`,
+    );
+    expect(helper[1]).toMatch(
+      /create_header_search_path_for_frameworks\(\s*'PODS_CONFIGURATION_BUILD_DIR', 'ReactCodegen', 'ReactCodegen', \['RNLlamaSpec'\], false,\s*\)/,
+    );
+    expect(helper[1]).toMatch(
+      /Array\(config\.build_settings\['HEADER_SEARCH_PATHS'\] \|\| '\$\(inherited\)'\)/,
+    );
+  });
+
+  it("lists whisper.rn's include directories in its from-source podspec", () => {
+    const fromSource = whisperPodspec.match(
+      /if ENV\["RNWHISPER_BUILD_FROM_SOURCE"\] == "1"([\s\S]*?)\n {2}else/,
+    );
+    expect(fromSource).not.toBeNull();
+    expect(fromSource[1]).toContain(
+      '["cpp", "cpp/ggml-cpu", "cpp/coreml", "cpp/jsi"].each { |dir| header_search_paths << "\\"$(PODS_TARGET_SRCROOT)/#{dir}\\"" }',
+    );
   });
 });

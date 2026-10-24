@@ -63,6 +63,32 @@ def add_llama_rn_headers_to_wrapper(installer, user_project)
   wrapper.settings = (wrapper.settings || {}).merge('COMPILER_FLAGS' => flags)
 end
 
+# Header maps index every target's headers by basename, so llama.rn's and
+# whisper.rn's same-named ggml headers (ggml.h, ggml-impl.h, ...) resolve into
+# each other. Without them only explicit search paths apply; llama.rn needs two
+# that only its header map supplied.
+def resolve_ggml_headers_by_search_path(installer)
+  extra_search_paths = {
+    'llama-rn' => [
+      '"$(PODS_TARGET_SRCROOT)/vendor/llama.cpp/vendor/nlohmann"',
+      *ReactNativePodsUtils.create_header_search_path_for_frameworks(
+        'PODS_CONFIGURATION_BUILD_DIR', 'ReactCodegen', 'ReactCodegen', ['RNLlamaSpec'], false,
+      ).map { |path| %("#{path}") },
+    ],
+    'whisper-rn' => [],
+  }
+  extra_search_paths.each do |name, paths|
+    target = installer.pods_project.targets.find { |t| t.name == name } or
+      raise Pod::Informative, "#{name} pod target not found"
+    target.build_configurations.each do |config|
+      config.build_settings['USE_HEADERMAP'] = 'NO'
+      next if paths.empty?
+      inherited = Array(config.build_settings['HEADER_SEARCH_PATHS'] || '$(inherited)')
+      config.build_settings['HEADER_SEARCH_PATHS'] = (inherited + paths).uniq
+    end
+  end
+end
+
 podfile_dir = Pathname.new(__dir__).realpath
 from_srcroot = ->(path) { Pathname.new(path).relative_path_from(podfile_dir).to_s }
 # whisper.rn's package exports hide package.json from require.resolve, so walk
@@ -219,6 +245,7 @@ target 'PocketPal' do
       end
     end
 
+    resolve_ggml_headers_by_search_path(installer)
     exclude_x86_64_simulator(installer.pods_project)
     installer.aggregate_targets.map(&:user_project).uniq(&:path).each do |user_project|
       exclude_x86_64_simulator(user_project)
