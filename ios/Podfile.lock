@@ -2607,6 +2607,31 @@ PODS:
     - ReactCodegen
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
+    - whisper-rn/no-require-arc (= 0.7.4)
+    - Yoga
+  - whisper-rn/no-require-arc (0.7.4):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React
+    - React-bridging
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
     - Yoga
   - Yoga (0.0.0):
     - React-Core-prebuilt
@@ -3154,9 +3179,9 @@ SPEC CHECKSUMS:
   SocketRocket: 37aec555668fb852ec12e3c0de59a86ca58f0871
   VisionCamera: 30b358b807324c692064f78385e9a732ce1bebfe
   WatermelonDB: 75e467adbaf2cb2809780fb3eda7ce4964e11778
-  whisper-rn: cdda4f3b622c8ac3543f4d56effa7db4a6637c39
+  whisper-rn: 7180cb5f08a59614f677e2ad4e131ba76ae30d78
   Yoga: d1c536142c5ff8ec8cd856ab2a7c227a1d875c8e
 
-PODFILE CHECKSUM: 1a7c3aed85f5dd2deb43f008b88fa271cf650dfa
+PODFILE CHECKSUM: 5d841a42dbfc6d653e4a08dea8435e8671631883
 
 COCOAPODS: 1.15.2
