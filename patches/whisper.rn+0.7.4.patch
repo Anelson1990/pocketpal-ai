@@ -1,0 +1,22 @@
+diff --git a/node_modules/whisper.rn/whisper-rn.podspec b/node_modules/whisper.rn/whisper-rn.podspec
+index e24aa83..9265609 100644
+--- a/node_modules/whisper.rn/whisper-rn.podspec
++++ b/node_modules/whisper.rn/whisper-rn.podspec
+@@ -38,12 +38,12 @@ Pod::Spec.new do |s|
+   if ENV["RNWHISPER_BUILD_FROM_SOURCE"] == "1"
+     s.source_files = "ios/**/*.{h,m,mm}", "cpp/**/*.{h,cpp,hpp,c,m,mm}"
+     s.exclude_files = "cpp/ggml-metal/*.m"
+-    s.resources = [
+-      "cpp/ggml-metal/kernels",
+-      "cpp/ggml-metal/ggml-metal-impl.h",
+-      "cpp/ggml-common.h"
+-    ]
+     base_compiler_flags += " -DRNWHISPER_BUILD_FROM_SOURCE"
++    base_compiler_flags += " -Dggml=rnwhisper_ggml" +
++      " -Ddl_load_library=rnwhisper_dl_load_library" +
++      " -Ddl_get_sym=rnwhisper_dl_get_sym" +
++      " -Ddl_error=rnwhisper_dl_error" +
++      " -Ddl_handle_deleter=rnwhisper_dl_handle_deleter"
+     header_search_paths << '"$(PODS_TARGET_SRCROOT)/cpp"'
+ 
+     s.subspec "no-require-arc" do |ss|
