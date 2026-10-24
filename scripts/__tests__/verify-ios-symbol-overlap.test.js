@@ -7,8 +7,8 @@ const SCRIPT = path.join(__dirname, '..', 'verify-ios-symbol-overlap.sh');
 
 const fixtures = [];
 
-const symbol = (a, b, demangled) => {
-  const fixture = {a, b, demangled};
+const symbol = (a, b, demangled, members = ['rn-llama.o', 'rn-whisper.o']) => {
+  const fixture = {a, b, demangled, members};
   fixtures.push(fixture);
   return fixture;
 };
@@ -16,7 +16,11 @@ const symbol = (a, b, demangled) => {
 const nmLine = (address, binding, name, section = '(__TEXT,__text)') =>
   `${address} ${section} ${binding} ${name}`;
 
-const both = line => ({a: line, b: line});
+const both = line => ({
+  a: line,
+  b: line,
+  members: ['rn-llama.o', 'rn-whisper.o'],
+});
 
 const sym = (address, binding, name, demangled, section) => {
   const line = nmLine(address, binding, name, section);
@@ -165,36 +169,195 @@ const CMP_TOP_K_SORT = symbol(
   'int* std::__1::__partial_sort_impl[abi:nqe210106]<std::__1::_ClassicAlgPolicy, cmp_top_k&, int*, int*>(int*, int*, int*, cmp_top_k&)',
 );
 
-const GGML_VTABLE = sym(
-  '0000000000000100',
-  'weak private external',
-  '__ZTVN4ggml3cpu17extra_buffer_typeE',
-  'vtable for ggml::cpu::extra_buffer_type',
-  '(__DATA,__const)',
-);
-const GGML_DTOR = sym(
-  '0000000000000140',
-  'private external',
-  '__ZN4ggml3cpu17extra_buffer_typeD2Ev',
-  'ggml::cpu::extra_buffer_type::~extra_buffer_type()',
-);
-const DL_LOAD = sym(
-  '0000000000000180',
-  'private external',
-  '__Z15dl_load_libraryRKNSt3__14__fs10filesystem4pathE',
+// Copied verbatim from nm on a device build without whisper.rn's renames.
+const DL_LOAD = symbol(
+  '0000000000000000 (__TEXT,__text) external __Z15dl_load_libraryRKNSt3__14__fs10filesystem4pathE',
+  '0000000000000000 (__TEXT,__text) private external __Z15dl_load_libraryRKNSt3__14__fs10filesystem4pathE',
   'dl_load_library(std::__1::__fs::filesystem::path const&)',
+  ['ggml-backend-dl.o', 'ggml-backend-dl.o'],
 );
+const EXTRA_BUFFER_TYPE_COLD_DTOR = symbol(
+  '0000000000000014 (__TEXT,__text) external [cold func] __ZN4ggml3cpu17extra_buffer_typeD0Ev',
+  '0000000000000014 (__TEXT,__text) private external [cold func] __ZN4ggml3cpu17extra_buffer_typeD0Ev',
+  'ggml::cpu::extra_buffer_type::~extra_buffer_type()',
+  ['traits.o', 'traits.o'],
+);
+const EXTRA_BUFFER_TYPE_DTOR = symbol(
+  '000000000000000c (__TEXT,__text) external __ZN4ggml3cpu17extra_buffer_typeD2Ev',
+  '000000000000000c (__TEXT,__text) private external __ZN4ggml3cpu17extra_buffer_typeD2Ev',
+  'ggml::cpu::extra_buffer_type::~extra_buffer_type()',
+  ['traits.o', 'traits.o'],
+);
+const DL_HANDLE_DTOR = symbol(
+  '00000000000001c0 (__TEXT,__text) weak private external __ZNSt3__110unique_ptrIv17dl_handle_deleterED1B9nqe210106Ev',
+  '00000000000001c0 (__TEXT,__text) weak private external __ZNSt3__110unique_ptrIv17dl_handle_deleterED1B9nqe210106Ev',
+  'std::__1::unique_ptr<void, dl_handle_deleter>::~unique_ptr[abi:nqe210106]()',
+  ['ggml-backend-reg.o', 'ggml-backend-reg.o'],
+);
+const REPACK_VTABLE = symbol(
+  '0000000000029778 (__DATA,__const) weak external automatically hidden __ZTVN4ggml3cpu6repack17extra_buffer_typeE',
+  '0000000000025808 (__DATA,__const) weak private external __ZTVN4ggml3cpu6repack17extra_buffer_typeE',
+  'vtable for ggml::cpu::repack::extra_buffer_type',
+  [
+    'repack-e3da9b24e36425e980c1cd620fcf0394.o',
+    'repack-7af0d67d55faee835825e4bd9c82d88e.o',
+  ],
+);
+const TENSOR_TRAITS_VTABLE = symbol(
+  '0000000000000158 (__DATA,__const) external __ZTVN4ggml3cpu13tensor_traitsE',
+  '0000000000000158 (__DATA,__const) private external __ZTVN4ggml3cpu13tensor_traitsE',
+  'vtable for ggml::cpu::tensor_traits',
+  ['traits.o', 'traits.o'],
+);
+const UNRENAMED_BUILD = [
+  symbol(
+    '00000000000000b0 (__TEXT,__text) external __Z8dl_errorv',
+    '00000000000000b0 (__TEXT,__text) private external __Z8dl_errorv',
+    'dl_error()',
+    ['ggml-backend-dl.o', 'ggml-backend-dl.o'],
+  ),
+  symbol(
+    '00000000000000ac (__TEXT,__text) external __Z10dl_get_symPvPKc',
+    '00000000000000ac (__TEXT,__text) private external __Z10dl_get_symPvPKc',
+    'dl_get_sym(void*, char const*)',
+    ['ggml-backend-dl.o', 'ggml-backend-dl.o'],
+  ),
+  DL_LOAD,
+  EXTRA_BUFFER_TYPE_COLD_DTOR,
+  symbol(
+    '0000000000000010 (__TEXT,__text) external [cold func] __ZN4ggml3cpu17extra_buffer_typeD1Ev',
+    '0000000000000010 (__TEXT,__text) private external [cold func] __ZN4ggml3cpu17extra_buffer_typeD1Ev',
+    'ggml::cpu::extra_buffer_type::~extra_buffer_type()',
+    ['traits.o', 'traits.o'],
+  ),
+  EXTRA_BUFFER_TYPE_DTOR,
+  symbol(
+    '0000000000027f18 (__TEXT,__text) weak private external __ZN4ggml3cpu6repack17extra_buffer_typeD0Ev',
+    '000000000002418c (__TEXT,__text) weak private external __ZN4ggml3cpu6repack17extra_buffer_typeD0Ev',
+    'ggml::cpu::repack::extra_buffer_type::~extra_buffer_type()',
+    [
+      'repack-e3da9b24e36425e980c1cd620fcf0394.o',
+      'repack-7af0d67d55faee835825e4bd9c82d88e.o',
+    ],
+  ),
+  symbol(
+    '0000000000027f14 (__TEXT,__text) weak private external __ZN4ggml3cpu6repack17extra_buffer_typeD1Ev',
+    '0000000000024188 (__TEXT,__text) weak private external __ZN4ggml3cpu6repack17extra_buffer_typeD1Ev',
+    'ggml::cpu::repack::extra_buffer_type::~extra_buffer_type()',
+    [
+      'repack-e3da9b24e36425e980c1cd620fcf0394.o',
+      'repack-7af0d67d55faee835825e4bd9c82d88e.o',
+    ],
+  ),
+  symbol(
+    '0000000000000008 (__TEXT,__text) external [cold func] __ZN4ggml3cpu13tensor_traitsD0Ev',
+    '0000000000000008 (__TEXT,__text) private external [cold func] __ZN4ggml3cpu13tensor_traitsD0Ev',
+    'ggml::cpu::tensor_traits::~tensor_traits()',
+    ['traits.o', 'traits.o'],
+  ),
+  symbol(
+    '0000000000000004 (__TEXT,__text) external [cold func] __ZN4ggml3cpu13tensor_traitsD1Ev',
+    '0000000000000004 (__TEXT,__text) private external [cold func] __ZN4ggml3cpu13tensor_traitsD1Ev',
+    'ggml::cpu::tensor_traits::~tensor_traits()',
+    ['traits.o', 'traits.o'],
+  ),
+  symbol(
+    '0000000000000000 (__TEXT,__text) external __ZN4ggml3cpu13tensor_traitsD2Ev',
+    '0000000000000000 (__TEXT,__text) private external __ZN4ggml3cpu13tensor_traitsD2Ev',
+    'ggml::cpu::tensor_traits::~tensor_traits()',
+    ['traits.o', 'traits.o'],
+  ),
+  CMP_TOP_K_SORT,
+  NODE_INFO_EMPLACE,
+  DL_HANDLE_DTOR,
+  symbol(
+    '00000000000014cc (__TEXT,__text) weak private external __ZNSt3__16vectorI9node_infoNS_9allocatorIS1_EEE20__throw_length_errorB9nqe210106Ev',
+    '00000000000015e4 (__TEXT,__text) weak private external __ZNSt3__16vectorI9node_infoNS_9allocatorIS1_EEE20__throw_length_errorB9nqe210106Ev',
+    'std::__1::vector<node_info, std::__1::allocator<node_info>>::__throw_length_error[abi:nqe210106]()',
+    ['ggml-metal-common.o', 'ggml-metal-common.o'],
+  ),
+  symbol(
+    '00000000000013ac (__TEXT,__text) weak private external __ZNSt3__16vectorI9node_infoNS_9allocatorIS1_EEED1B9nqe210106Ev',
+    '00000000000014c4 (__TEXT,__text) weak private external __ZNSt3__16vectorI9node_infoNS_9allocatorIS1_EEED1B9nqe210106Ev',
+    'std::__1::vector<node_info, std::__1::allocator<node_info>>::~vector[abi:nqe210106]()',
+    ['ggml-metal-common.o', 'ggml-metal-common.o'],
+  ),
+  NODE_INFO_RESERVE,
+  symbol(
+    '00000000000001c8 (__DATA,__const) external __ZTIN4ggml3cpu17extra_buffer_typeE',
+    '00000000000001c8 (__DATA,__const) private external __ZTIN4ggml3cpu17extra_buffer_typeE',
+    'typeinfo for ggml::cpu::extra_buffer_type',
+    ['traits.o', 'traits.o'],
+  ),
+  symbol(
+    '00000000000297a8 (__DATA,__const) weak private external __ZTIN4ggml3cpu6repack17extra_buffer_typeE',
+    '0000000000025838 (__DATA,__const) weak private external __ZTIN4ggml3cpu6repack17extra_buffer_typeE',
+    'typeinfo for ggml::cpu::repack::extra_buffer_type',
+    [
+      'repack-e3da9b24e36425e980c1cd620fcf0394.o',
+      'repack-7af0d67d55faee835825e4bd9c82d88e.o',
+    ],
+  ),
+  symbol(
+    '00000000000295c8 (__DATA,__const) weak private external __ZTIN4ggml3cpu6repack18tensor_traits_baseE',
+    '0000000000025688 (__DATA,__const) weak private external __ZTIN4ggml3cpu6repack18tensor_traits_baseE',
+    'typeinfo for ggml::cpu::repack::tensor_traits_base',
+    [
+      'repack-e3da9b24e36425e980c1cd620fcf0394.o',
+      'repack-7af0d67d55faee835825e4bd9c82d88e.o',
+    ],
+  ),
+  symbol(
+    '0000000000000188 (__DATA,__const) external __ZTIN4ggml3cpu13tensor_traitsE',
+    '0000000000000188 (__DATA,__const) private external __ZTIN4ggml3cpu13tensor_traitsE',
+    'typeinfo for ggml::cpu::tensor_traits',
+    ['traits.o', 'traits.o'],
+  ),
+  symbol(
+    '00000000000001f3 (__TEXT,__const) external __ZTSN4ggml3cpu17extra_buffer_typeE',
+    '00000000000001f3 (__TEXT,__const) private external __ZTSN4ggml3cpu17extra_buffer_typeE',
+    'typeinfo name for ggml::cpu::extra_buffer_type',
+    ['traits.o', 'traits.o'],
+  ),
+  symbol(
+    '0000000000028b5e (__TEXT,__const) weak private external __ZTSN4ggml3cpu6repack17extra_buffer_typeE',
+    '0000000000024ce4 (__TEXT,__const) weak private external __ZTSN4ggml3cpu6repack17extra_buffer_typeE',
+    'typeinfo name for ggml::cpu::repack::extra_buffer_type',
+    [
+      'repack-e3da9b24e36425e980c1cd620fcf0394.o',
+      'repack-7af0d67d55faee835825e4bd9c82d88e.o',
+    ],
+  ),
+  symbol(
+    '0000000000028695 (__TEXT,__const) weak private external __ZTSN4ggml3cpu6repack18tensor_traits_baseE',
+    '000000000002485a (__TEXT,__const) weak private external __ZTSN4ggml3cpu6repack18tensor_traits_baseE',
+    'typeinfo name for ggml::cpu::repack::tensor_traits_base',
+    [
+      'repack-e3da9b24e36425e980c1cd620fcf0394.o',
+      'repack-7af0d67d55faee835825e4bd9c82d88e.o',
+    ],
+  ),
+  symbol(
+    '00000000000001d8 (__TEXT,__const) external __ZTSN4ggml3cpu13tensor_traitsE',
+    '00000000000001d8 (__TEXT,__const) private external __ZTSN4ggml3cpu13tensor_traitsE',
+    'typeinfo name for ggml::cpu::tensor_traits',
+    ['traits.o', 'traits.o'],
+  ),
+  symbol(
+    '0000000000000198 (__DATA,__const) external __ZTVN4ggml3cpu17extra_buffer_typeE',
+    '0000000000000198 (__DATA,__const) private external __ZTVN4ggml3cpu17extra_buffer_typeE',
+    'vtable for ggml::cpu::extra_buffer_type',
+    ['traits.o', 'traits.o'],
+  ),
+  REPACK_VTABLE,
+  TENSOR_TRAITS_VTABLE,
+];
+
 const STD_OVER_GGML = sym(
   '00000000000001c0',
   'weak private external',
   '__ZNSt3__16vectorIP11ggml_tensorNS_9allocatorIS2_EEED2Ev',
   'std::__1::vector<ggml_tensor*, std::__1::allocator<ggml_tensor*> >::~vector()',
-);
-const STD_OVER_DL = sym(
-  '0000000000000200',
-  'weak private external',
-  '__ZNSt3__110unique_ptrIv17dl_handle_deleterE5resetEPv',
-  'std::__1::unique_ptr<void, dl_handle_deleter>::reset(void*)',
 );
 const C_FUNCTION = sym(
   '0000000000000220',
@@ -279,11 +442,17 @@ function run(aSymbols, bSymbols, {env = {}, args} = {}) {
   const b = path.join(tmp, 'libwhisper-rn.a');
   fs.writeFileSync(
     `${a}.nm`,
-    archive(a, [['rn-llama.o', aSymbols.map(s => s.a)]]),
+    archive(
+      a,
+      aSymbols.map(s => [s.members[0], [s.a]]),
+    ),
   );
   fs.writeFileSync(
     `${b}.nm`,
-    archive(b, [['rn-whisper.o', bSymbols.map(s => s.b)]]),
+    archive(
+      b,
+      bSymbols.map(s => [s.members[1], [s.b]]),
+    ),
   );
   const result = spawnSync('bash', [SCRIPT, ...(args || [a, b])], {
     encoding: 'utf-8',
@@ -345,11 +514,12 @@ const DENIED = {
   'a std:: template over a first-party comparator': CMP_TOP_K_SORT,
   'a global C function': C_FUNCTION,
   'a first-party namespace': OTHER_NAMESPACE,
-  'a weak hidden ggml::cpu vtable': GGML_VTABLE,
-  'a strong hidden ggml::cpu destructor': GGML_DTOR,
-  'a strong dl_ function': DL_LOAD,
+  'a ggml::cpu vtable': TENSOR_TRAITS_VTABLE,
+  'a weak ggml::cpu vtable': REPACK_VTABLE,
+  'a ggml::cpu destructor': EXTRA_BUFFER_TYPE_COLD_DTOR,
+  'a dl_ function': DL_LOAD,
   'a std:: template over a ggml type': STD_OVER_GGML,
-  'a std:: template over a dl_ type': STD_OVER_DL,
+  'a std:: template over a dl_ type': DL_HANDLE_DTOR,
   'a facebook:: namespace other than JSI and React': OTHER_FACEBOOK_NAMESPACE,
   'an ObjC protocol named after whisper': WHISPER_PROTOCOL,
 };
@@ -394,19 +564,28 @@ describe('denied overlap', () => {
     expect(result.status).toBe(1);
   });
 
-  it('fails when only one side is weak', () => {
-    const strong = both(
-      nmLine(
-        '0000000000000100',
-        'private external',
-        '__ZTVN4ggml3cpu17extra_buffer_typeE',
-        '(__DATA,__const)',
-      ),
-    );
-    const result = run([strong], [GGML_VTABLE]);
+  it('fails whatever binding each side has', () => {
+    const shared = [TENSOR_TRAITS_VTABLE, REPACK_VTABLE];
+    const result = run(shared, shared);
     expect(result.verdicts).toEqual([
-      'DENY private external / weak private external vtable for ggml::cpu::extra_buffer_type',
+      'DENY external / private external vtable for ggml::cpu::tensor_traits',
+      'DENY weak external automatically hidden / weak private external vtable for ggml::cpu::repack::extra_buffer_type',
     ]);
+    expect(result.status).toBe(1);
+  });
+
+  it('fails on every duplicate of a build that ld links by keeping one copy', () => {
+    const result = run(UNRENAMED_BUILD, UNRENAMED_BUILD);
+    expect(result.verdicts).toHaveLength(28);
+    for (const fixture of UNRENAMED_BUILD) {
+      expect(verdictOf(result, fixture)).toEqual(
+        UNRENAMED_BUILD.filter(f => f.demangled === fixture.demangled).map(
+          () => 'DENY',
+        ),
+      );
+      expect(result.stdout).toContain(`  ${fixture.a}\n  ${fixture.b}\n`);
+    }
+    expect(result.stdout).toContain('28 shared, 28 denied');
     expect(result.status).toBe(1);
   });
 });
@@ -423,7 +602,10 @@ describe('the binding filter', () => {
         '__ZN4ggml3cpu17extra_buffer_typeD2Ev',
       ),
     );
-    const result = run([local, wasHidden, OWN_A], [local, GGML_DTOR, OWN_B]);
+    const result = run(
+      [local, wasHidden, OWN_A],
+      [local, EXTRA_BUFFER_TYPE_DTOR, OWN_B],
+    );
     expect(result.verdicts).toEqual([]);
     expect(result.status).toBe(0);
   });
@@ -456,9 +638,13 @@ describe('the binding filter', () => {
         '__Z15dl_load_libraryRKNSt3__14__fs10filesystem4pathE',
       ),
     );
-    const result = run([annotated], [DL_LOAD]);
+    const result = run(
+      [annotated, EXTRA_BUFFER_TYPE_COLD_DTOR],
+      [DL_LOAD, EXTRA_BUFFER_TYPE_COLD_DTOR],
+    );
     expect(result.verdicts).toEqual([
       'DENY external / private external dl_load_library(std::__1::__fs::filesystem::path const&)',
+      'DENY external / private external ggml::cpu::extra_buffer_type::~extra_buffer_type()',
     ]);
     expect(result.status).toBe(1);
   });
