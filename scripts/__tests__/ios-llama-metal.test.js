@@ -12,6 +12,7 @@ const GGML_METAL = path.join(
   'src',
   'ggml-metal',
 );
+const WHISPER_CPP = path.join(ROOT, 'node_modules', 'whisper.rn', 'cpp');
 const read = file => fs.readFileSync(path.join(ROOT, file), 'utf-8');
 
 const appDelegate = read('ios/PocketPal/AppDelegate.swift');
@@ -33,21 +34,37 @@ const metalDevice = fs.readFileSync(
   'utf-8',
 );
 
-const kernelSet = [
-  ...(metalDevice.match(/^#define GGML_METAL_LIBS((?:.*\\\n)+.*)/m) || [
-    '',
-    '',
-  ])[1].matchAll(/X\(\s*\w+\s*,\s*(\w+)\s*\)/g),
-].map(match => match[1]);
-const kernelFiles = fs
-  .readdirSync(path.join(GGML_METAL, 'kernels'), {withFileTypes: true})
-  .filter(entry => entry.isFile())
-  .map(entry => entry.name)
-  .sort();
+const parseKernelSet = (source, macro) =>
+  [
+    ...(source.match(
+      new RegExp(`^#define ${macro}((?:.*\\\\\\n)+.*)`, 'm'),
+    ) || ['', ''])[1].matchAll(/X\(\s*\w+\s*,\s*(\w+)\s*\)/g),
+  ].map(match => match[1]);
+const listKernelFiles = metalDir =>
+  fs
+    .readdirSync(path.join(metalDir, 'kernels'), {withFileTypes: true})
+    .filter(entry => entry.isFile())
+    .map(entry => entry.name)
+    .sort();
 
-const metalPhase = (() => {
+const kernelSet = parseKernelSet(metalDevice, 'GGML_METAL_LIBS');
+const kernelFiles = listKernelFiles(GGML_METAL);
+const whisperKernelSet = parseKernelSet(
+  fs.readFileSync(
+    path.join(WHISPER_CPP, 'ggml-metal', 'ggml-metal-device.m'),
+    'utf-8',
+  ),
+  'WSP_GGML_METAL_LIBS',
+);
+const whisperKernelFiles = listKernelFiles(
+  path.join(WHISPER_CPP, 'ggml-metal'),
+);
+
+const parsePhase = library => {
   const match = pbxproj.match(
-    /\/\* \[CP-User\] Build llama\.rn Metal kernels \*\/ = \{([\s\S]*?)\n\t\t\};/,
+    new RegExp(
+      `/\\* \\[CP-User\\] Build ${library.replace('.', '\\.')} Metal kernels \\*/ = \\{([\\s\\S]*?)\\n\\t\\t\\};`,
+    ),
   );
   if (!match) {
     return null;
@@ -65,7 +82,9 @@ const metalPhase = (() => {
     outputs: list('outputPaths'),
     script: script ? script[1].replace(/\\"/g, '"') : '',
   };
-})();
+};
+const metalPhase = parsePhase('llama.rn');
+const whisperPhase = parsePhase('whisper.rn');
 
 const APP_RESOURCES =
   '$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)';
@@ -76,10 +95,18 @@ describe('the parse itself', () => {
     expect(kernelFiles.length).toBeGreaterThan(kernelSet.length);
   });
 
-  it('finds the Metal kernel phase in the app project', () => {
-    expect(metalPhase).not.toBeNull();
-    expect(metalPhase.inputs.length).toBeGreaterThan(0);
-    expect(metalPhase.outputs.length).toBeGreaterThan(0);
+  it('finds the whisper.rn kernel set in its ggml', () => {
+    expect(whisperKernelSet).toHaveLength(20);
+    expect(whisperKernelFiles.length).toBeGreaterThan(whisperKernelSet.length);
+  });
+
+  it.each([
+    ['llama.rn', metalPhase],
+    ['whisper.rn', whisperPhase],
+  ])('finds the %s Metal kernel phase in the app project', (_, phase) => {
+    expect(phase).not.toBeNull();
+    expect(phase.inputs.length).toBeGreaterThan(0);
+    expect(phase.outputs.length).toBeGreaterThan(0);
   });
 });
 
@@ -99,6 +126,14 @@ describe('the parsed kernel set', () => {
       .map(name => name.replace(/\.metal$/, ''));
     expect(included.size).toBeGreaterThan(0);
     expect([...kernelSet].sort()).toEqual(entryPoints);
+  });
+
+  it('is every whisper.rn kernel source', () => {
+    expect([...whisperKernelSet].sort()).toEqual(
+      whisperKernelFiles
+        .filter(name => name.endsWith('.metal'))
+        .map(name => name.replace(/\.metal$/, '')),
+    );
   });
 });
 
@@ -218,6 +253,36 @@ describe('the llama.rn build mode', () => {
   });
 });
 
+describe('the whisper.rn build mode', () => {
+  it('is set to from-source at the Podfile top level, before any target, and nowhere else in it', () => {
+    const setAt = podfile.search(
+      /^ENV\['RNWHISPER_BUILD_FROM_SOURCE'\] = '1'$/m,
+    );
+    expect(setAt).toBeGreaterThanOrEqual(0);
+    expect(setAt).toBeLessThan(podfile.search(/^target /m));
+    expect(podfile.match(/RNWHISPER_BUILD_FROM_SOURCE/g)).toHaveLength(1);
+  });
+
+  it('is set nowhere else, and no build turns whisper.rn Metal off', () => {
+    const files = [
+      'package.json',
+      'ios/fastlane/Fastfile',
+      ...fs
+        .readdirSync(path.join(ROOT, '.github', 'workflows'))
+        .map(name => `.github/workflows/${name}`),
+      ...fs
+        .readdirSync(path.join(ROOT, 'scripts'))
+        .filter(name => name.endsWith('.sh'))
+        .map(name => `scripts/${name}`),
+    ];
+    const offenders = files.filter(file =>
+      /RNWHISPER_(BUILD_FROM_SOURCE|DISABLE_METAL)/.test(read(file)),
+    );
+    expect(offenders).toEqual([]);
+    expect(podfile).not.toMatch(/RNWHISPER_DISABLE_METAL/);
+  });
+});
+
 describe('the patched llama.rn Metal lookup', () => {
   it('builds Metal without the embedded kernel library', () => {
     expect(podspec).not.toMatch(/-DGGML_METAL_EMBED_LIBRARY/);
@@ -289,9 +354,39 @@ describe('the committed Metal kernel phase', () => {
     const phases = pbxproj.match(/Build llama\.rn Metal kernels \*\/ = \{/g);
     expect(phases).toHaveLength(1);
     expect(pbxproj.match(/rnllama\.metallib/g)).toHaveLength(1);
-    expect(pbxproj).not.toMatch(
-      /default\.metallib|\.metal in (Sources|Resources)/,
-    );
+    expect(pbxproj).not.toMatch(/\.metal in (Sources|Resources)/);
+  });
+});
+
+describe('the committed whisper.rn Metal kernel phase', () => {
+  it('compiles exactly the whisper.rn kernel set, in order', () => {
+    const args = whisperPhase.script.trim().split(/\s+/);
+    expect(args.slice(0, 3)).toEqual([
+      '"${SRCROOT}/../scripts/build-ios-metallib.sh"',
+      '--whisper',
+      '"${SRCROOT}/../node_modules/whisper.rn/cpp"',
+    ]);
+    expect(args.slice(3)).toEqual(whisperKernelSet);
+  });
+
+  it('declares every whisper.rn kernel file and both headers as inputs', () => {
+    const prefix = '$(SRCROOT)/../node_modules/whisper.rn/cpp';
+    expect(whisperPhase.inputs).toEqual([
+      ...whisperKernelFiles.map(name => `${prefix}/ggml-metal/kernels/${name}`),
+      `${prefix}/ggml-metal/ggml-metal-impl.h`,
+      `${prefix}/ggml-common.h`,
+      '$(SRCROOT)/../scripts/build-ios-metallib.sh',
+    ]);
+  });
+
+  it('writes only default.metallib', () => {
+    expect(whisperPhase.outputs).toEqual([`${APP_RESOURCES}/default.metallib`]);
+  });
+
+  it('is the only writer of default.metallib in the app project', () => {
+    const phases = pbxproj.match(/Build whisper\.rn Metal kernels \*\/ = \{/g);
+    expect(phases).toHaveLength(1);
+    expect(pbxproj.match(/default\.metallib/g)).toHaveLength(1);
   });
 });
 
