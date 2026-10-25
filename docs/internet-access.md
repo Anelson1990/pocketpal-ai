@@ -40,3 +40,6 @@ The APK path may differ by flavor; check `app/build/outputs/apk/`. The repo's
 - No on-device test and no Android build were done by the author (build env could not reach Maven).
 - Model-side Hermes tool-call parsing lives in llama.cpp / llama.rn and is not unit-tested here.
   Which Hermes GGUFs ship a tool-use chat template should be checked per model.
+
+## CI
+GitHub Actions (CI Pipeline) builds the Android APK; download it from the run page under Artifacts as `android-release-apk`.
