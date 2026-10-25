@@ -17,7 +17,13 @@ import {chatSessionRepository} from '../repositories/ChatSessionRepository';
 import {defaultCompletionParams} from '../utils/completionSettingsVersions';
 import {derivedText} from '../utils/chat';
 import {palStore} from './PalStore';
-import {deriveToolSchemas} from '../services/talents';
+import {
+  deriveToolSchemas,
+  resolveTalentNames,
+  stripInternetTools,
+} from '../services/talents';
+import type {ToolDefinition} from '../services/talents/types';
+import {searchProviderStore} from './SearchProviderStore';
 import {AgentUiState, initialAgentUiState} from '../services/agent';
 
 /**
@@ -1520,9 +1526,9 @@ class ChatSessionStore {
     };
 
     // Apply pal-specific settings if available
+    const pal = palId ? palStore.pals.find(p => p.id === palId) : undefined;
     if (palId) {
       // Use in-memory pal store as the source of truth (avoids cache invalidation issues)
-      const pal = palStore.pals.find(p => p.id === palId);
       const palSettings = pal?.completionSettings;
 
       if (palSettings) {
@@ -1531,17 +1537,23 @@ class ChatSessionStore {
           ...palSettings,
         };
       }
+    }
 
-      // Inject tool schemas from pact.talents (PACT → completionSettings.tools)
-      const talentNames = pal?.pact?.talents?.map(t => t.name);
-      if (talentNames && talentNames.length > 0) {
-        const tools = deriveToolSchemas(talentNames);
-        if (tools.length > 0) {
-          resolvedSettings = {
-            ...resolvedSettings,
-            tools,
-          };
-        }
+    // Inject tool schemas: pact.talents (PACT → completionSettings.tools) plus
+    // web_search/read_url when the chat's Internet toggle is on — for any chat,
+    // with or without a Pal. The toggle also removes a Pal's own internet talents.
+    const internetOn = searchProviderStore.canSearch;
+    const talentNames = resolveTalentNames(
+      pal?.pact?.talents?.map(t => t.name) ?? [],
+      internetOn,
+    );
+    if (talentNames.length > 0) {
+      const tools = deriveToolSchemas(talentNames);
+      if (tools.length > 0) {
+        resolvedSettings = {
+          ...resolvedSettings,
+          tools,
+        };
       }
     }
 
@@ -1577,6 +1589,19 @@ class ChatSessionStore {
           resolvedSettings = {...resolvedSettings, tools: pactTools};
         }
       }
+    }
+
+    // OFF means OFF whatever layer the tools came from: a session saved while
+    // the toggle was on keeps its `tools` in custom settings, and an older Pal
+    // may carry its own. Strip internet tools that survived to this point.
+    const gatedTools = stripInternetTools(
+      resolvedSettings.tools as ToolDefinition[] | undefined,
+      internetOn,
+    );
+    if (gatedTools !== resolvedSettings.tools) {
+      const next = {...resolvedSettings};
+      delete next.tools;
+      resolvedSettings = gatedTools ? {...next, tools: gatedTools} : next;
     }
 
     return resolvedSettings;

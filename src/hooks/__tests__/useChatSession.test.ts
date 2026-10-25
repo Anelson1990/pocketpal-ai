@@ -13,7 +13,12 @@ import {
 } from '../../../jest/fixtures/models';
 
 import {useChatSession} from '../useChatSession';
-import {isReadUrlAllowed} from '../../services/talents';
+import {
+  INTERNET_OFF_MESSAGE,
+  INTERNET_OFF_PROMPT,
+  isReadUrlAllowed,
+  registerDefaultTalents,
+} from '../../services/talents';
 import {bodyExtras} from '../../api/servers';
 
 import {
@@ -23,6 +28,7 @@ import {
   serverStore,
   ttsStore,
   uiStore,
+  searchProviderStore,
 } from '../../store';
 
 import {l10n} from '../../locales';
@@ -1081,6 +1087,238 @@ describe('useChatSession', () => {
 
       expect(isReadUrlAllowed('https://user.example.com/doc')).toBe(true);
       expect(isReadUrlAllowed('https://other.example.com/x')).toBe(false);
+    });
+  });
+
+  describe('Internet toggle wiring', () => {
+    const webSearchTool = {
+      type: 'function',
+      function: {name: 'web_search', description: '', parameters: {}},
+    };
+    const readUrlTool = {
+      type: 'function',
+      function: {name: 'read_url', description: '', parameters: {}},
+    };
+
+    const advertise = async (...tools: object[]) => {
+      const base = await chatSessionStore.getCurrentCompletionSettings();
+      (
+        chatSessionStore.getCurrentCompletionSettings as jest.Mock
+      ).mockResolvedValueOnce({...base, tools});
+    };
+
+    const useSession = (talents: string[] = []) => {
+      const pal = {
+        id: 'toggle-pal',
+        type: 'local' as const,
+        name: 'Toggle Pal',
+        systemPrompt: 'You are helpful.',
+        parameters: {},
+        parameterSchema: [],
+        isSystemPromptChanged: false,
+        useAIPrompt: false,
+        source: 'local' as const,
+        pact: {talents: talents.map(name => ({name, necessity: 'optional'}))},
+      };
+      palStore.pals = [pal as any];
+      chatSessionStore.sessions = [
+        {
+          id: 'toggle-session',
+          activePalId: pal.id,
+          title: 'Toggle',
+          date: new Date().toISOString().split('T')[0],
+          messages: [],
+          completionSettings: mockDefaultCompletionParams,
+          settingsSource: 'pal' as const,
+        },
+      ];
+      chatSessionStore.activeSessionId = 'toggle-session';
+    };
+
+    const send = async () => {
+      const {result} = renderHook(() =>
+        useChatSession({current: null}, textMessage.author, mockAssistant),
+      );
+      await act(async () => {
+        await result.current.handleSendPress(textMessage);
+      });
+    };
+
+    const captureSystem = () => {
+      const captured: {system: string[]} = {system: []};
+      modelStore.context!.completion = jest
+        .fn()
+        .mockImplementation((params: any) => {
+          captured.system = (params.messages ?? [])
+            .filter((m: any) => m.role === 'system')
+            .map((m: any) => m.content);
+          return Promise.resolve({timings: {total: 100}, usage: {}});
+        });
+      return captured;
+    };
+
+    /** Model asks for web_search on every turn that still has tools. */
+    const relentlessSearcher = () => {
+      const calls: any[] = [];
+      let n = 0;
+      modelStore.context!.completion = jest
+        .fn()
+        .mockImplementation(async (params: any) => {
+          calls.push(params);
+          if (!params.tools) {
+            return {text: 'final', content: 'final'};
+          }
+          n += 1;
+          return {
+            text: '',
+            content: '',
+            tool_calls: [
+              {
+                id: `c${n}`,
+                type: 'function',
+                function: {
+                  name: 'web_search',
+                  arguments: JSON.stringify({query: `query number ${n}`}),
+                },
+              },
+            ],
+          };
+        });
+      return calls;
+    };
+
+    beforeEach(() => {
+      registerDefaultTalents();
+      runInAction(() => {
+        searchProviderStore.hasConsentedToSearch = false;
+        searchProviderStore.internetEnabled = null;
+        searchProviderStore.maxToolCalls = 5;
+      });
+      (chatSessionStore.appendToolOutcome as jest.Mock).mockClear();
+    });
+
+    afterEach(() => {
+      runInAction(() => {
+        searchProviderStore.hasConsentedToSearch = false;
+        searchProviderStore.internetEnabled = null;
+        searchProviderStore.maxToolCalls = 5;
+      });
+    });
+
+    const outcomesFor = (toolName: string) =>
+      (chatSessionStore.appendToolOutcome as jest.Mock).mock.calls
+        .map(c => c[2])
+        .filter(o => o?.toolName === toolName);
+
+    it('explains that internet is off when search is set up but the toggle is off', async () => {
+      useSession();
+      runInAction(() => {
+        searchProviderStore.hasConsentedToSearch = true;
+        searchProviderStore.internetEnabled = false;
+        (searchProviderStore as any).keys = {brave: 'k'};
+      });
+      const captured = captureSystem();
+
+      await send();
+
+      expect(captured.system).toHaveLength(1);
+      expect(captured.system[0]).toContain('You are helpful.');
+      expect(captured.system[0]).toContain(INTERNET_OFF_PROMPT);
+    });
+
+    it('also explains it for a Pal that declares web_search but has no setup', async () => {
+      useSession(['web_search']);
+      const captured = captureSystem();
+
+      await send();
+
+      expect(captured.system[0]).toContain(INTERNET_OFF_PROMPT);
+    });
+
+    it('stays silent for a chat that never touches internet features', async () => {
+      useSession(['calculate']);
+      const captured = captureSystem();
+
+      await send();
+
+      expect(captured.system).toEqual(['You are helpful.']);
+    });
+
+    it('does not claim internet is off while internet tools are advertised', async () => {
+      useSession();
+      await advertise(webSearchTool, readUrlTool);
+      const captured = captureSystem();
+
+      await send();
+
+      expect(captured.system.join('\n')).not.toContain(INTERNET_OFF_PROMPT);
+      expect(captured.system.join('\n')).toContain('web_search');
+    });
+
+    it('allows a tool call for an advertised internet tool (it reaches the engine)', async () => {
+      useSession();
+      await advertise(webSearchTool, readUrlTool);
+      relentlessSearcher();
+
+      await send();
+
+      // Passed the allowlist and reached the real engine, which refuses
+      // because the (real) store has the toggle off in this test.
+      const [first] = outcomesFor('web_search');
+      expect(first.responseContent).toContain(INTERNET_OFF_MESSAGE);
+    });
+
+    it('rejects an internet tool call when none was advertised, even if the Pal declares it', async () => {
+      useSession(['web_search']);
+      relentlessSearcher();
+      // Nothing advertised: the Pal's web_search is stripped while OFF.
+      (
+        chatSessionStore.getCurrentCompletionSettings as jest.Mock
+      ).mockResolvedValueOnce({
+        ...(await chatSessionStore.getCurrentCompletionSettings()),
+        tools: [{...webSearchTool, function: {name: 'calculate'}}],
+      });
+
+      await send();
+
+      const [first] = outcomesFor('web_search');
+      expect(first.responseContent).toMatch(/not enabled/);
+    });
+
+    it('limits a runaway searcher to the configured maxToolCalls, then forces an answer', async () => {
+      useSession();
+      runInAction(() => {
+        searchProviderStore.maxToolCalls = 2;
+      });
+      await advertise(webSearchTool);
+      const calls = relentlessSearcher();
+
+      await send();
+
+      // 2 tool rounds + 1 closing completion with the tools withdrawn.
+      expect(calls).toHaveLength(3);
+      expect(calls[0].tools).toBeDefined();
+      expect(calls[2].tools).toBeUndefined();
+      expect(outcomesFor('web_search')).toHaveLength(2);
+    });
+
+    it('uses the new limit on the next message after it changes', async () => {
+      useSession();
+      runInAction(() => {
+        searchProviderStore.maxToolCalls = 1;
+      });
+      await advertise(webSearchTool);
+      let calls = relentlessSearcher();
+      await send();
+      expect(calls).toHaveLength(2);
+
+      runInAction(() => {
+        searchProviderStore.maxToolCalls = 3;
+      });
+      await advertise(webSearchTool);
+      calls = relentlessSearcher();
+      await send();
+      expect(calls).toHaveLength(4);
     });
   });
 

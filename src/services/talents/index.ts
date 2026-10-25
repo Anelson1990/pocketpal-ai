@@ -5,6 +5,7 @@ import {WebSearchEngine} from './WebSearchEngine';
 import {ReadUrlEngine} from './ReadUrlEngine';
 import {talentRegistry} from './TalentRegistry';
 import type {SearchAccess} from './searchAccess';
+import {INTERNET_OFF_PROMPT} from './searchAccess';
 import type {ToolDefinition, SystemPromptContext} from './types';
 import {searchProviderStore} from '../../store/SearchProviderStore';
 import {createSearchProvider, readWithDefaultReader} from '../search';
@@ -18,6 +19,11 @@ export {DatetimeEngine} from './DatetimeEngine';
 export {WebSearchEngine} from './WebSearchEngine';
 export {ReadUrlEngine} from './ReadUrlEngine';
 export type {SearchAccess} from './searchAccess';
+export {
+  INTERNET_OFF_MESSAGE,
+  INTERNET_OFF_PROMPT,
+  SEARCH_NOT_SET_UP_MESSAGE,
+} from './searchAccess';
 // Deliberately narrow: the raw allowlist writers stay module-internal so all
 // writes happen inside services/talents (seed at run start, WebSearchEngine
 // per search, ReadUrlEngine per page read).
@@ -40,9 +46,60 @@ function createSearchAccess(): SearchAccess {
       return createSearchProvider(id, () => searchProviderStore.getKey(id));
     },
     canSearch: () => searchProviderStore.canSearch,
+    isInternetOn: () => searchProviderStore.isInternetOn,
     getResultCount: () => searchProviderStore.resultCount,
     readWithDefaultReader,
   };
+}
+
+/** Talents that make requests to the internet on the model's behalf. */
+export const INTERNET_TALENT_NAMES: readonly string[] = [
+  'web_search',
+  'read_url',
+];
+
+const isInternetTalent = (name: string): boolean =>
+  INTERNET_TALENT_NAMES.includes(name);
+
+/**
+ * The talents a request may use: the Pal's own, with the internet ones gated by
+ * the Internet toggle. ON adds web_search/read_url for any chat (Pal or not);
+ * OFF removes them even if the Pal declares them. Tool schemas and the run's
+ * allowlist both come from here so they cannot disagree.
+ */
+export function resolveTalentNames(
+  palTalentNames: readonly string[],
+  internetOn: boolean,
+): string[] {
+  const names = palTalentNames.filter(
+    name => internetOn || !isInternetTalent(name),
+  );
+  if (internetOn) {
+    for (const name of INTERNET_TALENT_NAMES) {
+      if (!names.includes(name)) {
+        names.push(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * Last line of defence for the OFF state: drops internet tool schemas that
+ * arrived from any other settings layer (a Pal's saved settings, or a session
+ * that stored `tools` while the toggle was on).
+ */
+export function stripInternetTools<T extends {function?: {name?: string}}>(
+  tools: T[] | undefined,
+  internetOn: boolean,
+): T[] | undefined {
+  if (!tools || internetOn) {
+    return tools;
+  }
+  const kept = tools.filter(
+    tool => !isInternetTalent(tool.function?.name ?? ''),
+  );
+  return kept.length > 0 ? kept : undefined;
 }
 
 let registered = false;
@@ -94,15 +151,23 @@ export function deriveToolSchemas(talentNames?: string[]): ToolDefinition[] {
 export function collectSystemPromptFragments(
   talentNames: string[],
   ctx: Omit<SystemPromptContext, 'activeTalents'>,
+  options: {explainInternetOff?: boolean} = {},
 ): string[] {
   registerDefaultTalents();
   const wanted = new Set(talentNames);
   const engineCtx: SystemPromptContext = {...ctx, activeTalents: wanted};
-  return talentRegistry
+  const fragments = talentRegistry
     .getAll()
     .filter(engine => wanted.has(engine.name))
     .map(engine => engine.systemPromptFragment?.(engineCtx))
     .filter((fragment): fragment is string => !!fragment && !!fragment.trim());
+  // Internet is a feature here (set up, or the Pal declares it) but switched
+  // off: tell the model so it can explain the limit. Callers leave this false
+  // otherwise so chats that never use search keep their prompt unchanged.
+  if (options.explainInternetOff && !talentNames.some(isInternetTalent)) {
+    fragments.push(INTERNET_OFF_PROMPT);
+  }
+  return fragments;
 }
 
 /**

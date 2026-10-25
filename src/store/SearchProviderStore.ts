@@ -34,10 +34,30 @@ const DEFAULT_RESULT_COUNT = 5;
 const MIN_RESULT_COUNT = 1;
 const MAX_RESULT_COUNT = 8;
 
+/** Ceiling on tool rounds AND executed tool calls in one reply. */
+export const DEFAULT_MAX_TOOL_CALLS = 5;
+export const MIN_MAX_TOOL_CALLS = 1;
+export const MAX_MAX_TOOL_CALLS = 10;
+
+const clampMaxToolCalls = (raw: unknown): number =>
+  typeof raw === 'number' && Number.isFinite(raw)
+    ? Math.min(
+        MAX_MAX_TOOL_CALLS,
+        Math.max(MIN_MAX_TOOL_CALLS, Math.round(raw)),
+      )
+    : DEFAULT_MAX_TOOL_CALLS;
+
 class SearchProviderStore {
   activeProviderId: SearchProviderId = DEFAULT_PROVIDER;
   resultCount: number = DEFAULT_RESULT_COUNT;
   hasConsentedToSearch = false;
+  /**
+   * The chat-UI Internet toggle. `null` = the user never touched it, in which
+   * case it follows consent, so people who already enabled search keep working
+   * and new users start OFF.
+   */
+  internetEnabled: boolean | null = null;
+  maxToolCalls: number = DEFAULT_MAX_TOOL_CALLS;
 
   /** In-memory mirror of each provider's BYOK key (source of truth: Keychain). */
   private keys: Partial<Record<SearchProviderId, string>> = {};
@@ -47,7 +67,13 @@ class SearchProviderStore {
 
     makePersistable(this, {
       name: 'SearchProviderStore',
-      properties: ['activeProviderId', 'resultCount', 'hasConsentedToSearch'],
+      properties: [
+        'activeProviderId',
+        'resultCount',
+        'hasConsentedToSearch',
+        'internetEnabled',
+        'maxToolCalls',
+      ],
       storage: AsyncStorage,
     }).then(() => this.normalizeHydratedPrefs());
 
@@ -70,10 +96,16 @@ class SearchProviderStore {
           )
         : DEFAULT_RESULT_COUNT;
     const consent = (this.hasConsentedToSearch as unknown) === true;
+    // Only a literal boolean is a deliberate choice; anything else is "unset".
+    const rawInternet: unknown = this.internetEnabled;
+    const internet = typeof rawInternet === 'boolean' ? rawInternet : null;
+    const maxToolCalls = clampMaxToolCalls(this.maxToolCalls);
     runInAction(() => {
       this.activeProviderId = provider;
       this.resultCount = count;
       this.hasConsentedToSearch = consent;
+      this.internetEnabled = internet;
+      this.maxToolCalls = maxToolCalls;
     });
   }
 
@@ -118,8 +150,36 @@ class SearchProviderStore {
     );
   }
 
-  get canSearch(): boolean {
+  /** Consent given and a usable provider: search *could* be switched on. */
+  get isSetUp(): boolean {
     return this.hasConsentedToSearch && this.isProviderConfigured;
+  }
+
+  /** The chat toggle's effective position (unset follows consent). */
+  get isInternetOn(): boolean {
+    return this.internetEnabled ?? this.hasConsentedToSearch;
+  }
+
+  /**
+   * The single gate for every network lookup made for the model: tool
+   * advertising, the run allowlist and each engine's execute() all read this.
+   */
+  get canSearch(): boolean {
+    return this.isInternetOn && this.isSetUp;
+  }
+
+  setInternetEnabled(enabled: boolean) {
+    runInAction(() => {
+      this.internetEnabled = enabled;
+    });
+    resetSearchCache();
+  }
+
+  setMaxToolCalls(count: number) {
+    const clamped = clampMaxToolCalls(count);
+    runInAction(() => {
+      this.maxToolCalls = clamped;
+    });
   }
 
   setActiveProvider(id: SearchProviderId) {

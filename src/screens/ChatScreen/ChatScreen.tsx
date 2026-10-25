@@ -25,6 +25,7 @@ import {
   modelStore,
   chatSessionStore,
   palStore,
+  searchProviderStore,
   serverStore,
   ttsStore,
   uiStore,
@@ -190,7 +191,9 @@ export const ChatScreen: React.FC = observer(() => {
     const palDeclaresTools =
       activePal?.pact?.talents !== undefined &&
       activePal.pact.talents.length > 0;
-    if (!palDeclaresTools) {
+    // The Internet toggle advertises web_search/read_url to any chat, so the
+    // same model-compatibility warning applies when it is on.
+    if (!palDeclaresTools && !searchProviderStore.canSearch) {
       return;
     }
     const model = (modelStore.context as any)?.model;
@@ -225,7 +228,12 @@ export const ChatScreen: React.FC = observer(() => {
     });
     uiStore.markToolCompatWarned(modelId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePalId, modelStore.activeModelId, modelStore.context]);
+  }, [
+    activePalId,
+    modelStore.activeModelId,
+    modelStore.context,
+    searchProviderStore.canSearch,
+  ]);
 
   // Persist the on/off intent (and optional effort) onto both the local
   // enable_thinking flag and the reasoning carrier so the remote wire path
@@ -257,6 +265,27 @@ export const ChatScreen: React.FC = observer(() => {
   // reasoning carrier (effort undefined) so remote OFF is not a no-op.
   const handleThinkingToggle = async (enabled: boolean) => {
     await persistReasoning(enabled);
+  };
+
+  // Internet pill. Turning it ON needs consent and a configured provider (both
+  // live in Settings → Internet Search); when they're missing, say how to finish
+  // setup instead of silently doing nothing.
+  const handleInternetToggle = () => {
+    if (searchProviderStore.canSearch) {
+      searchProviderStore.setInternetEnabled(false);
+      return;
+    }
+    if (searchProviderStore.isSetUp) {
+      searchProviderStore.setInternetEnabled(true);
+      return;
+    }
+    uiStore.setChatWarning({
+      code: 'unknown',
+      message: l10n.chat.internetNotSetUp,
+      context: 'chat',
+      recoverable: true,
+      severity: 'warning',
+    });
   };
 
   // Graded pill cycle: off -> values[0] -> ... -> values[n] -> off.
@@ -320,6 +349,9 @@ export const ChatScreen: React.FC = observer(() => {
             showThinkingToggle: thinkingSupported,
             isThinkingEnabled: thinkingEnabled,
             onThinkingToggle: handleThinkingToggle,
+            showInternetToggle: !!modelStore.activeModel,
+            isInternetEnabled: searchProviderStore.canSearch,
+            onInternetToggle: handleInternetToggle,
             supportsEffort: reasoningCapability.supportsEffort,
             effortValues: reasoningCapability.effortValues,
             reasoningEffort,

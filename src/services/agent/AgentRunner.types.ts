@@ -111,5 +111,9 @@ export interface AgentRunOptions {
    * `run_started`; it does NOT touch any store. */
   messageId: string;
   maxTurns?: number;
+  /** Most tool calls actually executed in this run; extra calls get an error
+   * outcome instead of running. Bounds parallel calls inside a single turn,
+   * which `maxTurns` alone does not. */
+  maxToolCalls?: number;
   signal?: AbortSignal;
 }

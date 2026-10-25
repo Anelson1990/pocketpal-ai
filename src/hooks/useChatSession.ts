@@ -11,6 +11,7 @@ import {
   modelStore,
   NEW_SESSION_TITLE,
   palStore,
+  searchProviderStore,
   serverStore,
   ttsStore,
   uiStore,
@@ -54,6 +55,8 @@ import {
 } from '../utils/completionTypes';
 import {
   collectSystemPromptFragments,
+  INTERNET_TALENT_NAMES,
+  resolveTalentNames,
   seedReadUrlAllowlist,
   talentRegistry,
 } from '../services/talents';
@@ -61,7 +64,6 @@ import type {ToolDefinition} from '../services/talents/types';
 import {
   agentStateReducer,
   createTriggerMarkerCache,
-  DEFAULT_MAX_TURNS,
   initialAgentUiState,
   runAgent,
   type AgentEvent,
@@ -83,6 +85,7 @@ const prepareCompletion = async ({
   l10n,
   currentMessages,
   spoken,
+  explainInternetOff,
 }: {
   imageUris: string[];
   message: MessageType.PartialText;
@@ -94,6 +97,8 @@ const prepareCompletion = async ({
   l10n: any;
   currentMessages: MessageType.Any[];
   spoken: boolean;
+  /** Internet is set up (or the Pal declares it) but switched off. */
+  explainInternetOff: boolean;
 }) => {
   const sessionCompletionSettings =
     await chatSessionStore.getCurrentCompletionSettings();
@@ -158,10 +163,14 @@ const prepareCompletion = async ({
   const sessionToolNames = (
     (sessionCompletionSettings?.tools as ToolDefinition[] | undefined) ?? []
   ).map(tool => tool.function?.name ?? '');
-  const systemPromptFragments = collectSystemPromptFragments(sessionToolNames, {
-    now: new Date(),
-    maxToolTurns: DEFAULT_MAX_TURNS,
-  });
+  const systemPromptFragments = collectSystemPromptFragments(
+    sessionToolNames,
+    {
+      now: new Date(),
+      maxToolTurns: searchProviderStore.maxToolCalls,
+    },
+    {explainInternetOff},
+  );
 
   const messages = assembleMessages(systemMessages, systemPromptFragments, [
     ...chatMessages,
@@ -826,14 +835,32 @@ export const useChatSession = (
       l10n,
       currentMessages,
       spoken: !!opts.spoken,
+      explainInternetOff:
+        searchProviderStore.isSetUp ||
+        (pal?.pact?.talents ?? []).some(t =>
+          INTERNET_TALENT_NAMES.includes(t.name),
+        ),
     });
 
     currentMessageInfo.current = messageInfo;
     opts.onTurnCreated?.(messageInfo.id);
 
-    // Allowed talent names for this Pal. The runner rejects any
-    // tool call whose function.name isn't in this list.
-    const palTalents = (pal?.pact?.talents ?? []).map(t => t.name);
+    // Tools actually advertised to the model for this request (resolved from
+    // the Pal's talents and the Internet toggle in the settings resolver).
+    const tools =
+      (cleanCompletionParams.tools as ToolDefinition[] | undefined) ?? [];
+
+    // Allowed talent names. The runner rejects any tool call whose
+    // function.name isn't in this list. The internet half follows what was
+    // advertised, so the allowlist and the schemas can't disagree even if the
+    // toggle flips between resolving settings and starting the run.
+    const internetAdvertised = tools.some(tool =>
+      INTERNET_TALENT_NAMES.includes(tool.function?.name ?? ''),
+    );
+    const palTalents = resolveTalentNames(
+      (pal?.pact?.talents ?? []).map(t => t.name),
+      internetAdvertised,
+    );
 
     const completionStartTime = Date.now();
     const timeToFirstTokenMs: {value: number | null} = {value: null};
@@ -847,8 +874,6 @@ export const useChatSession = (
     // defeating marker detection. Failure is non-fatal: we fall back
     // to `[]` and let `tool_call_started` drive the UX flip (one beat
     // later) instead of `marker_seen`.
-    const tools =
-      (cleanCompletionParams.tools as ToolDefinition[] | undefined) ?? [];
     const tts: TtsRunState = {
       enabled: ttsStore.streamsReplies,
       started: false,
@@ -893,6 +918,8 @@ export const useChatSession = (
         talentLookup: name => talentRegistry.get(name),
         triggerMarkers,
         messageId: messageInfo.id,
+        maxTurns: searchProviderStore.maxToolCalls,
+        maxToolCalls: searchProviderStore.maxToolCalls,
         signal: lease.signal,
       });
 

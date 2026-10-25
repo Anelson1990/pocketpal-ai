@@ -114,6 +114,7 @@ const runRow = async (row: Row) => {
   const access: SearchAccess = {
     getActiveProvider: () => provider,
     canSearch: () => true,
+    isInternetOn: () => true,
     getResultCount: () => 3,
     readWithDefaultReader: jest.fn(),
   };

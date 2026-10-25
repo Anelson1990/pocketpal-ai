@@ -66,6 +66,10 @@ import {
   purchaseStore,
   voiceModeStore,
 } from '../../store';
+import {
+  MAX_MAX_TOOL_CALLS,
+  MIN_MAX_TOOL_CALLS,
+} from '../../store/SearchProviderStore';
 import {authService} from '../../services';
 import type {SearchProviderId} from '../../services/search/types';
 import {
@@ -1534,6 +1538,30 @@ export const SettingsScreen: React.FC = observer(() => {
                   />
                   <Text variant="labelSmall" style={styles.textDescription}>
                     {l10n.settings.internetSearch.resultCountDescription}
+                  </Text>
+                </View>
+
+                {/* Per-reply tool-call limit */}
+                <Divider style={styles.divider} />
+                <View style={styles.textContainer}>
+                  <Text variant="titleMedium" style={styles.textLabel}>
+                    {l10n.settings.internetSearch.maxToolCallsLabel}
+                  </Text>
+                  <InputSlider
+                    testID="search-max-tool-calls-slider"
+                    accessibilityLabel={
+                      l10n.settings.internetSearch.maxToolCallsLabel
+                    }
+                    value={searchProviderStore.maxToolCalls}
+                    onValueChange={value =>
+                      searchProviderStore.setMaxToolCalls(Math.round(value))
+                    }
+                    min={MIN_MAX_TOOL_CALLS}
+                    max={MAX_MAX_TOOL_CALLS}
+                    step={1}
+                  />
+                  <Text variant="labelSmall" style={styles.textDescription}>
+                    {l10n.settings.internetSearch.maxToolCallsDescription}
                   </Text>
                 </View>
               </View>

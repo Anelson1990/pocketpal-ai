@@ -57,6 +57,8 @@ describe('SearchProviderStore', () => {
         'activeProviderId',
         'resultCount',
         'hasConsentedToSearch',
+        'internetEnabled',
+        'maxToolCalls',
       ]);
       expect(config.properties).not.toContain('keys');
       expect(JSON.stringify(config.properties)).not.toMatch(/key/i);
@@ -235,6 +237,133 @@ describe('SearchProviderStore', () => {
       expect(store.canSearch).toBe(false);
       store.setConsent(true);
       expect(store.canSearch).toBe(true);
+    });
+  });
+
+  describe('Internet toggle (internetEnabled)', () => {
+    const setUp = async (store: SearchProviderStore) => {
+      store.setConsent(true);
+      await store.setKey('brave', 'k');
+    };
+
+    it('starts unset: OFF for a new user, nothing can search', async () => {
+      const store = await newStore();
+      expect(store.internetEnabled).toBeNull();
+      expect(store.isInternetOn).toBe(false);
+      expect(store.isSetUp).toBe(false);
+      expect(store.canSearch).toBe(false);
+    });
+
+    it('unset follows consent, so users who already enabled search keep working', async () => {
+      const store = await newStore();
+      await setUp(store);
+      expect(store.internetEnabled).toBeNull();
+      expect(store.isInternetOn).toBe(true);
+      expect(store.canSearch).toBe(true);
+    });
+
+    it('an explicit OFF beats consent + a key (the chat toggle is a kill switch)', async () => {
+      const store = await newStore();
+      await setUp(store);
+      store.setInternetEnabled(false);
+      expect(store.isSetUp).toBe(true);
+      expect(store.isInternetOn).toBe(false);
+      expect(store.canSearch).toBe(false);
+    });
+
+    it('an explicit ON cannot search without consent and a configured provider', async () => {
+      const store = await newStore();
+      store.setInternetEnabled(true);
+      expect(store.isInternetOn).toBe(true);
+      expect(store.canSearch).toBe(false);
+      store.setConsent(true);
+      expect(store.canSearch).toBe(false); // consent but no key
+      await store.setKey('brave', 'k');
+      expect(store.canSearch).toBe(true);
+    });
+
+    it('revoking consent switches search off even while the toggle is ON', async () => {
+      const store = await newStore();
+      await setUp(store);
+      store.setInternetEnabled(true);
+      store.setConsent(false);
+      expect(store.canSearch).toBe(false);
+    });
+
+    it('can be switched back and forth', async () => {
+      const store = await newStore();
+      await setUp(store);
+      store.setInternetEnabled(false);
+      store.setInternetEnabled(true);
+      expect(store.canSearch).toBe(true);
+    });
+
+    it('resets the search cache when toggled', async () => {
+      const reset = jest.spyOn(budget, 'resetSearchCache');
+      const store = await newStore();
+      reset.mockClear();
+      store.setInternetEnabled(true);
+      expect(reset).toHaveBeenCalled();
+      reset.mockRestore();
+    });
+
+    it('persists the toggle (listed in the persisted properties)', async () => {
+      await newStore();
+      const config = persistMock.mock.calls[0][1];
+      expect(config.properties).toContain('internetEnabled');
+    });
+
+    it('keeps a persisted boolean and treats anything else as unset', async () => {
+      for (const [persisted, expected] of [
+        [true, true],
+        [false, false],
+        ['true', null],
+        [1, null],
+        [undefined, null],
+      ] as const) {
+        const store = await newStore();
+        (store as any).internetEnabled = persisted;
+        store.normalizeHydratedPrefs();
+        expect(store.internetEnabled).toBe(expected);
+      }
+    });
+  });
+
+  describe('maxToolCalls (per-reply tool-call limit)', () => {
+    it('defaults to 5', async () => {
+      const store = await newStore();
+      expect(store.maxToolCalls).toBe(5);
+    });
+
+    it('clamps into 1..10 and rounds', async () => {
+      const store = await newStore();
+      store.setMaxToolCalls(0);
+      expect(store.maxToolCalls).toBe(1);
+      store.setMaxToolCalls(99);
+      expect(store.maxToolCalls).toBe(10);
+      store.setMaxToolCalls(3.6);
+      expect(store.maxToolCalls).toBe(4);
+    });
+
+    it('falls back to the default for NaN / non-numeric input', async () => {
+      const store = await newStore();
+      store.setMaxToolCalls(Number.NaN);
+      expect(store.maxToolCalls).toBe(5);
+    });
+
+    it('repairs a corrupt persisted value after hydration', async () => {
+      for (const [persisted, expected] of [
+        [7, 7],
+        [500, 10],
+        [-3, 1],
+        ['many', 5],
+        [Number.POSITIVE_INFINITY, 5],
+      ] as const) {
+        const store = await newStore();
+        (store as any).maxToolCalls = persisted;
+        store.normalizeHydratedPrefs();
+        expect(store.maxToolCalls).toBe(expected);
+      }
     });
   });
 

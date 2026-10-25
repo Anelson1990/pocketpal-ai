@@ -124,6 +124,23 @@ function normalizeToolCallIds(
 
 const NO_FUNCTION_NAME = 'Unknown talent (no function name)';
 
+/**
+ * A call past the per-reply budget is answered, not run: every tool_call still
+ * needs a matching tool message or strict chat templates reject the next turn.
+ */
+function overBudgetOutcome(call: AgentToolCall): AgentToolOutcome {
+  const toolName = call.function?.name ?? '';
+  const summary = `${
+    toolName || NO_FUNCTION_NAME
+  }: not run, the tool-call limit for this reply was reached. Answer with the information already gathered.`;
+  return {
+    callId: call.id,
+    toolName,
+    result: {type: 'error', summary, errorMessage: 'tool-call limit reached'},
+    responseContent: summary,
+  };
+}
+
 function cancelledOutcome(call: AgentToolCall): AgentToolOutcome {
   const toolName = call.function?.name ?? '';
   const summary = `${toolName || NO_FUNCTION_NAME}: cancelled`;
@@ -265,6 +282,8 @@ export async function* runAgent(
     triggerMarkers,
     messageId,
     maxTurns = DEFAULT_MAX_TURNS,
+    // Finite by default: the old ceiling (every turn, full parallelism).
+    maxToolCalls = maxTurns * MAX_IN_FLIGHT_TOOL_CALLS,
     signal,
   } = options;
 
@@ -291,6 +310,7 @@ export async function* runAgent(
 
   let messages = initialParams.messages;
   let turn = 0;
+  let executedToolCalls = 0;
   let forceFinal = false;
   // Holds the engine's CompletionResult after each turn finishes.
   // Mutated from inside the streaming-bridge `.then` handler (the
@@ -483,9 +503,15 @@ export async function* runAgent(
             }
             return;
           }
+          if (executedToolCalls >= maxToolCalls) {
+            slots[next].resolve(overBudgetOutcome(calls[next]));
+            next += 1;
+            continue;
+          }
           if (running >= MAX_IN_FLIGHT_TOOL_CALLS) {
             return;
           }
+          executedToolCalls += 1;
           const slot = slots[next];
           const pending = executeOne(
             calls[next],
