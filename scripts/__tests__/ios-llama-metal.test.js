@@ -47,13 +47,20 @@ const listKernelFiles = metalDir =>
     .map(entry => entry.name)
     .sort();
 
+const whisperMetalDevice = fs.readFileSync(
+  path.join(WHISPER_CPP, 'ggml-metal', 'ggml-metal-device.m'),
+  'utf-8',
+);
+const whisperCpp = fs.readFileSync(
+  path.join(WHISPER_CPP, 'whisper.cpp'),
+  'utf-8',
+);
+const ciWorkflow = read('.github/workflows/ci.yml');
+
 const kernelSet = parseKernelSet(metalDevice, 'GGML_METAL_LIBS');
 const kernelFiles = listKernelFiles(GGML_METAL);
 const whisperKernelSet = parseKernelSet(
-  fs.readFileSync(
-    path.join(WHISPER_CPP, 'ggml-metal', 'ggml-metal-device.m'),
-    'utf-8',
-  ),
+  whisperMetalDevice,
   'WSP_GGML_METAL_LIBS',
 );
 const whisperKernelFiles = listKernelFiles(
@@ -320,6 +327,139 @@ describe('the patched llama.rn Metal lookup', () => {
   });
 });
 
+describe("whisper.rn's Metal library lookup", () => {
+  const preInstall = podfile.match(
+    /pre_install do \|installer\|([\s\S]*?)\n {2}end/,
+  );
+
+  it("looks up default.metallib in its own class's bundle, which static linking makes the app's", () => {
+    const bundle = whisperMetalDevice.indexOf(
+      'NSBundle * bundle = [NSBundle bundleForClass:[WSPGGMLMetalClass class]];',
+    );
+    const lookup = whisperMetalDevice.indexOf(
+      'NSString * path_lib = [bundle pathForResource:@"default" ofType:@"metallib"];',
+    );
+    expect(bundle).toBeGreaterThan(-1);
+    expect(lookup).toBeGreaterThan(bundle);
+    expect(preInstall).not.toBeNull();
+    expect(preInstall[1]).toMatch(
+      /pod\.name == 'whisper-rn'|pod\.name\.start_with\?\('whisper'\)/,
+    );
+    expect(preInstall[1]).toMatch(/Pod::BuildType\.static_library/);
+  });
+
+  it('turns the tensor API on only by GPU family, so its opt-out cannot be overridden', () => {
+    const assignments = [
+      ...whisperMetalDevice.matchAll(/dev->props\.has_tensor\s*=\s*([^;]+);/g),
+    ].map(match => match[1].trim());
+    expect(assignments[0]).toBe(
+      '[dev->mtl_device supportsFamily:MTLGPUFamilyMetal4_GGML]',
+    );
+    expect(assignments.length).toBeGreaterThan(1);
+    expect(assignments.slice(1)).toEqual(
+      assignments.slice(1).map(() => 'false'),
+    );
+    expect(whisperMetalDevice).toMatch(
+      /if \(getenv\("WSP_GGML_METAL_TENSOR_DISABLE"\) != NULL\) \{\s*dev->props\.has_tensor = false;\s*\}/,
+    );
+  });
+});
+
+describe("whisper.rn's from-source podspec", () => {
+  const fromSource = whisperPodspec.match(
+    /if ENV\["RNWHISPER_BUILD_FROM_SOURCE"\] == "1"([\s\S]*?)\n {2}else/,
+  );
+
+  it('finds the from-source branch', () => {
+    expect(fromSource).not.toBeNull();
+  });
+
+  it("ships no resources, so the app root's kernels/ and headers stay llama.rn's", () => {
+    expect(fromSource[1]).not.toMatch(/s\.resources|vendored_frameworks/);
+  });
+
+  it('builds Metal against the precompiled library, not an embedded one', () => {
+    expect(whisperPodspec).toMatch(/-DWSP_GGML_USE_METAL\b/);
+    expect(whisperPodspec).not.toMatch(/WSP_GGML_METAL_EMBED_LIBRARY/);
+  });
+
+  it("gives each unprefixed C++ name llama.rn's ggml also defines a whisper-only name", () => {
+    expect(
+      [...fromSource[1].matchAll(/-D(\w+)=(\w+)/g)].map(([, from, to]) => [
+        from,
+        to,
+      ]),
+    ).toEqual(
+      [
+        'ggml',
+        'dl_load_library',
+        'dl_get_sym',
+        'dl_error',
+        'dl_handle_deleter',
+        'node_info',
+        'cmp_top_k',
+      ].map(name => [name, `rnwhisper_${name}`]),
+    );
+  });
+});
+
+describe('the patched whisper.rn GPU init', () => {
+  const functionBody = signature => {
+    const start = whisperCpp.indexOf(signature);
+    return start < 0
+      ? ''
+      : whisperCpp.slice(start, whisperCpp.indexOf('\n}\n', start));
+  };
+  const initNoState = functionBody(
+    'struct whisper_context * whisper_init_with_params_no_state(',
+  );
+  const initState = functionBody(
+    'struct whisper_state * whisper_init_state(whisper_context * ctx) {',
+  );
+
+  it('finds both init functions', () => {
+    expect(initNoState).toContain('whisper_model_load(loader, *ctx)');
+    expect(initState).toContain(
+      'state->backends = whisper_backend_init(ctx->params);',
+    );
+    expect(initState).toContain('whisper_kv_cache_init(');
+  });
+
+  it('probes the GPU backend after taking the params and before placing the weights, and falls back to CPU', () => {
+    const probe = initNoState.match(
+      /if \(ctx->params\.use_gpu\) \{\s*wsp_ggml_backend_t (\w+) = whisper_backend_init_gpu\(ctx->params\);\s*if \(\1\) \{\s*wsp_ggml_backend_free\(\1\);\s*\} else \{\s*ctx->params\.use_gpu = false;\s*WHISPER_LOG_WARN\("%s: GPU backend init failed, falling back to CPU\\n", __func__\);\s*\}\s*\}/,
+    );
+    expect(probe).not.toBeNull();
+    expect(initNoState.indexOf('ctx->params = params;')).toBeGreaterThan(-1);
+    expect(initNoState.indexOf('ctx->params = params;')).toBeLessThan(
+      probe.index,
+    );
+    expect(probe.index).toBeLessThan(
+      initNoState.indexOf('whisper_model_load(loader, *ctx)'),
+    );
+  });
+
+  it('is the only writer of the context GPU flag', () => {
+    expect(whisperCpp.match(/\bctx->params\.use_gpu\s*=(?!=)/g)).toEqual([
+      'ctx->params.use_gpu =',
+    ]);
+    expect(initNoState).toContain('ctx->params.use_gpu = false;');
+  });
+
+  it('refuses a state with no GPU-type backend while the context asks for one, before allocating on any', () => {
+    const guard = initState.match(
+      /if \(ctx->params\.use_gpu\) \{\s*bool has_gpu = false;\s*for \(wsp_ggml_backend_t (\w+) : state->backends\) \{\s*const auto type = wsp_ggml_backend_dev_type\(wsp_ggml_backend_get_device\(\1\)\);\s*has_gpu = has_gpu \|\| type == WSP_GGML_BACKEND_DEVICE_TYPE_GPU \|\| type == WSP_GGML_BACKEND_DEVICE_TYPE_IGPU;\s*\}\s*if \(!has_gpu\) \{\s*WHISPER_LOG_ERROR\([^;]*\);\s*whisper_free_state\(state\);\s*return nullptr;\s*\}\s*\}/,
+    );
+    expect(guard).not.toBeNull();
+    expect(guard.index).toBeGreaterThan(
+      initState.indexOf('state->backends = whisper_backend_init(ctx->params);'),
+    );
+    expect(guard.index).toBeLessThan(
+      initState.indexOf('whisper_kv_cache_init('),
+    );
+  });
+});
+
 describe('the committed Metal kernel phase', () => {
   it('compiles exactly the vendored kernel set, in order', () => {
     const args = metalPhase.script.trim().split(/\s+/);
@@ -483,6 +623,93 @@ describe('ggml header resolution in the llama-rn and whisper-rn pods', () => {
     expect(fromSource).not.toBeNull();
     expect(fromSource[1]).toContain(
       '["cpp", "cpp/ggml-cpu", "cpp/coreml", "cpp/jsi"].each { |dir| header_search_paths << "\\"$(PODS_TARGET_SRCROOT)/#{dir}\\"" }',
+    );
+  });
+});
+
+describe('the iOS CI job', () => {
+  const job = ciWorkflow.match(
+    /^ {2}build-ios:\n([\s\S]*?)(?=^ {2}[\w-]+:\n|(?![\s\S]))/m,
+  );
+  const steps = job
+    ? [
+        ...job[1].matchAll(
+          /^ {6}- name: (.+)\n([\s\S]*?)(?=^ {6}- |(?![\s\S]))/gm,
+        ),
+      ].map(([, name, body]) => ({name, body}))
+    : [];
+  const stepIndex = name => steps.findIndex(step => step.name === name);
+  const step = name => steps[stepIndex(name)] || {body: ''};
+  const ARCHIVES = ['llama-rn/libllama-rn.a', 'whisper-rn/libwhisper-rn.a'];
+  const GATES = [
+    'Verify iOS payload',
+    'AMX scan (llama-rn, whisper-rn)',
+    'Symbol overlap (llama-rn, whisper-rn)',
+  ];
+
+  it('runs every whisper.rn gate after the Release build, unconditionally', () => {
+    const build = stepIndex('Build iOS Release');
+    expect(build).toBeGreaterThan(-1);
+    for (const name of GATES) {
+      expect(stepIndex(name)).toBeGreaterThan(build);
+      expect(step(name).body).not.toMatch(/^\s*(if|continue-on-error):/m);
+    }
+  });
+
+  it('fails the AMX scan on any AMX word in either archive, after flagging a planted one', () => {
+    const {body} = step('AMX scan (llama-rn, whisper-rn)');
+    expect(body).toContain('shell: bash -eo pipefail {0}');
+    const calibration = body.indexOf('test "$amx" -gt 0');
+    const loop = body.match(
+      /for lib in ([^;]+); do\s*lib="ios\/build\/Build\/Products\/Release-iphonesimulator\/\$lib"\s*test -f "\$lib"\s*scan "\$lib"\s*test "\$amx" -eq 0\s*done/,
+    );
+    expect(calibration).toBeGreaterThan(-1);
+    expect(loop).not.toBeNull();
+    expect(loop.index).toBeGreaterThan(calibration);
+    expect(loop[1].split(/\s+/)).toEqual(ARCHIVES);
+  });
+
+  it('compares the two archives last, after a planted symbol of each binding is denied', () => {
+    const {body} = step('Symbol overlap (llama-rn, whisper-rn)');
+    expect(body).toContain('shell: bash -eo pipefail {0}');
+    expect(body).toMatch(
+      /test "\$status" -eq 1\n\s*grep -q "\^DENY \.\* \$name\\\$" <<<"\$out"/,
+    );
+    const plants = [
+      ...body.matchAll(/^\s*plant (ggml_planted_\w+)((?:[^\n]*\\\n)*[^\n]*)/gm),
+    ].map(([, name, directives]) => ({
+      name,
+      directives,
+      at: body.indexOf(`plant ${name}`),
+    }));
+    const has = directive => plant => plant.directives.includes(directive);
+    expect(new Set(plants.map(plant => plant.name)).size).toBe(4);
+    expect(
+      plants.filter(
+        plant =>
+          !has('.weak_definition')(plant) && !has('.private_extern')(plant),
+      ),
+    ).toHaveLength(1);
+    expect(plants.filter(has('.weak_definition'))).toHaveLength(3);
+    expect(
+      plants.filter(
+        plant =>
+          has('.private_extern')(plant) && has('.weak_definition')(plant),
+      ),
+    ).toHaveLength(1);
+    expect(plants.filter(has('.weak_def_can_be_hidden'))).toHaveLength(1);
+    const lines = body.trim().split('\n');
+    expect(lines[lines.length - 1].trim()).toBe(
+      `scripts/verify-ios-symbol-overlap.sh ${ARCHIVES.map(
+        archive => `"$products/${archive}"`,
+      ).join(' ')}`,
+    );
+    const compare = body.lastIndexOf('scripts/verify-ios-symbol-overlap.sh');
+    for (const plant of plants) {
+      expect(plant.at).toBeLessThan(compare);
+    }
+    expect(body).toMatch(
+      /^\s*products=ios\/build\/Build\/Products\/Release-iphonesimulator$/m,
     );
   });
 });
