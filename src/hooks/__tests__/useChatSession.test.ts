@@ -16,10 +16,12 @@ import {useChatSession} from '../useChatSession';
 import {
   INTERNET_OFF_MESSAGE,
   INTERNET_OFF_PROMPT,
+  NOTES_OFF_MESSAGE,
   isReadUrlAllowed,
   registerDefaultTalents,
 } from '../../services/talents';
 import {bodyExtras} from '../../api/servers';
+import {notesStore as realNotesStore} from '../../store/NotesStore';
 
 import {
   chatSessionStore,
@@ -1319,6 +1321,99 @@ describe('useChatSession', () => {
       calls = relentlessSearcher();
       await send();
       expect(calls).toHaveLength(4);
+    });
+
+    describe('Notes memory wiring', () => {
+      const saveNoteTool = {
+        type: 'function',
+        function: {name: 'save_note', description: '', parameters: {}},
+      };
+
+      /** The model calls one tool once, then answers. */
+      const callsOnce = (name: string, args: object) => {
+        let first = true;
+        modelStore.context!.completion = jest
+          .fn()
+          .mockImplementation(async (params: any) => {
+            if (params.tools && first) {
+              first = false;
+              return {
+                text: '',
+                content: '',
+                tool_calls: [
+                  {
+                    id: 'n1',
+                    type: 'function',
+                    function: {name, arguments: JSON.stringify(args)},
+                  },
+                ],
+              };
+            }
+            return {text: 'done', content: 'done'};
+          });
+      };
+
+      let append: jest.SpyInstance;
+
+      beforeEach(() => {
+        realNotesStore.setEnabled(false);
+        append = jest
+          .spyOn(realNotesStore.storage, 'append')
+          .mockResolvedValue(undefined);
+        jest.spyOn(realNotesStore.storage, 'list').mockResolvedValue([]);
+      });
+
+      afterEach(() => {
+        realNotesStore.setEnabled(false);
+        jest.restoreAllMocks();
+      });
+
+      it('an advertised note tool passes the allowlist and is refused by the engine while the switch is off', async () => {
+        useSession();
+        await advertise(saveNoteTool);
+        callsOnce('save_note', {title: 'Teams', content: 'Lakers'});
+
+        await send();
+
+        const [outcome] = outcomesFor('save_note');
+        expect(outcome.responseContent).toContain(NOTES_OFF_MESSAGE);
+        expect(append).not.toHaveBeenCalled();
+      });
+
+      it('with the switch on, an advertised save_note really saves', async () => {
+        useSession();
+        realNotesStore.setEnabled(true);
+        await advertise(saveNoteTool);
+        callsOnce('save_note', {title: 'Favorite team', content: 'Lakers'});
+
+        await send();
+
+        expect(append).toHaveBeenCalledWith(
+          'favorite-team',
+          'Favorite team',
+          'Lakers',
+        );
+        const [outcome] = outcomesFor('save_note');
+        expect(outcome.responseContent).toContain('Saved to note');
+      });
+
+      it('rejects a note tool call when none was advertised, even if the Pal declares it and the switch is on', async () => {
+        useSession(['save_note']);
+        realNotesStore.setEnabled(true);
+        (
+          chatSessionStore.getCurrentCompletionSettings as jest.Mock
+        ).mockResolvedValueOnce({
+          ...(await chatSessionStore.getCurrentCompletionSettings()),
+          tools: [{...saveNoteTool, function: {name: 'calculate'}}],
+        });
+        callsOnce('save_note', {title: 'x', content: 'y'});
+
+        await send();
+
+        const [outcome] = outcomesFor('save_note');
+        expect(outcome.responseContent).toMatch(/not enabled/);
+        expect(append).not.toHaveBeenCalled();
+      });
     });
   });
 

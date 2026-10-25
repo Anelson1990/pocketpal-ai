@@ -3,11 +3,18 @@ import {CalculateEngine} from './CalculateEngine';
 import {DatetimeEngine} from './DatetimeEngine';
 import {WebSearchEngine} from './WebSearchEngine';
 import {ReadUrlEngine} from './ReadUrlEngine';
+import {
+  ReadNoteEngine,
+  SaveNoteEngine,
+  SearchNotesEngine,
+} from './NotesEngines';
 import {talentRegistry} from './TalentRegistry';
 import type {SearchAccess} from './searchAccess';
+import type {NotesAccess} from './notesAccess';
 import {INTERNET_OFF_PROMPT} from './searchAccess';
 import type {ToolDefinition, SystemPromptContext} from './types';
 import {searchProviderStore} from '../../store/SearchProviderStore';
+import {notesStore} from '../../store/NotesStore';
 import {createSearchProvider, readWithDefaultReader} from '../search';
 
 export {TalentRegistry, talentRegistry} from './TalentRegistry';
@@ -18,6 +25,13 @@ export {CalculateEngine} from './CalculateEngine';
 export {DatetimeEngine} from './DatetimeEngine';
 export {WebSearchEngine} from './WebSearchEngine';
 export {ReadUrlEngine} from './ReadUrlEngine';
+export {
+  ReadNoteEngine,
+  SaveNoteEngine,
+  SearchNotesEngine,
+} from './NotesEngines';
+export type {NotesAccess} from './notesAccess';
+export {NOTES_OFF_MESSAGE} from './notesAccess';
 export type {SearchAccess} from './searchAccess';
 export {
   INTERNET_OFF_MESSAGE,
@@ -52,6 +66,23 @@ function createSearchAccess(): SearchAccess {
   };
 }
 
+function createNotesAccess(): NotesAccess {
+  return {
+    isEnabled: () => notesStore.enabled,
+    storage: notesStore.storage,
+  };
+}
+
+/** Talents that read or write the user's private notes. */
+export const NOTES_TALENT_NAMES: readonly string[] = [
+  'save_note',
+  'search_notes',
+  'read_note',
+];
+
+const isNotesTalent = (name: string): boolean =>
+  NOTES_TALENT_NAMES.includes(name);
+
 /** Talents that make requests to the internet on the model's behalf. */
 export const INTERNET_TALENT_NAMES: readonly string[] = [
   'web_search',
@@ -70,9 +101,12 @@ const isInternetTalent = (name: string): boolean =>
 export function resolveTalentNames(
   palTalentNames: readonly string[],
   internetOn: boolean,
+  notesOn: boolean = false,
 ): string[] {
   const names = palTalentNames.filter(
-    name => internetOn || !isInternetTalent(name),
+    name =>
+      (internetOn || !isInternetTalent(name)) &&
+      (notesOn || !isNotesTalent(name)),
   );
   if (internetOn) {
     for (const name of INTERNET_TALENT_NAMES) {
@@ -81,7 +115,26 @@ export function resolveTalentNames(
       }
     }
   }
+  if (notesOn) {
+    for (const name of NOTES_TALENT_NAMES) {
+      if (!names.includes(name)) {
+        names.push(name);
+      }
+    }
+  }
   return names;
+}
+
+/** Same last-line guard as stripInternetTools, for the Notes memory switch. */
+export function stripNotesTools<T extends {function?: {name?: string}}>(
+  tools: T[] | undefined,
+  notesOn: boolean,
+): T[] | undefined {
+  if (!tools || notesOn) {
+    return tools;
+  }
+  const kept = tools.filter(tool => !isNotesTalent(tool.function?.name ?? ''));
+  return kept.length > 0 ? kept : undefined;
 }
 
 /**
@@ -119,6 +172,10 @@ export function registerDefaultTalents(): void {
   const searchAccess = createSearchAccess();
   talentRegistry.register(new WebSearchEngine(searchAccess));
   talentRegistry.register(new ReadUrlEngine(searchAccess));
+  const notesAccess = createNotesAccess();
+  talentRegistry.register(new SaveNoteEngine(notesAccess));
+  talentRegistry.register(new SearchNotesEngine(notesAccess));
+  talentRegistry.register(new ReadNoteEngine(notesAccess));
   registered = true;
 }
 

@@ -127,6 +127,17 @@
     "importButton": "Import",
     "importSuccess": "Successfully imported {{count}} chat session(s).",
     "importError": "Failed to import chat sessions. Please check the file format.",
+    "notesMemory": {
+      "title": "Notes memory",
+      "enableLabel": "Let the model save and search notes",
+      "description": "When on, the model can save short facts you ask it to remember and look them up in later chats. Notes are plain text stored only on this phone. The model can add to notes but cannot delete them.",
+      "clearButton": "Clear all notes",
+      "clearTitle": "Clear all notes",
+      "clearMessage": "This permanently deletes every saved note on this phone.",
+      "clearConfirm": "Delete",
+      "clearDone": "All notes were deleted.",
+      "clearFailed": "Notes could not be deleted."
+    },
     "internetSearch": {
       "title": "Internet Search",
       "description": "Let Pals search the web with their own tools. Bring your own API key — PocketPal never holds your keys or routes your queries.",

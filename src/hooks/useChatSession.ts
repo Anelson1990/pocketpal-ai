@@ -56,6 +56,7 @@ import {
 import {
   collectSystemPromptFragments,
   INTERNET_TALENT_NAMES,
+  NOTES_TALENT_NAMES,
   resolveTalentNames,
   seedReadUrlAllowlist,
   talentRegistry,
@@ -857,9 +858,13 @@ export const useChatSession = (
     const internetAdvertised = tools.some(tool =>
       INTERNET_TALENT_NAMES.includes(tool.function?.name ?? ''),
     );
+    const notesAdvertised = tools.some(tool =>
+      NOTES_TALENT_NAMES.includes(tool.function?.name ?? ''),
+    );
     const palTalents = resolveTalentNames(
       (pal?.pact?.talents ?? []).map(t => t.name),
       internetAdvertised,
+      notesAdvertised,
     );
 
     const completionStartTime = Date.now();

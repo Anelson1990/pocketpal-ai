@@ -63,6 +63,7 @@ import {
   ttsStore,
   asrStore,
   searchProviderStore,
+  notesStore,
   purchaseStore,
   voiceModeStore,
 } from '../../store';
@@ -1564,6 +1565,60 @@ export const SettingsScreen: React.FC = observer(() => {
                     {l10n.settings.internetSearch.maxToolCallsDescription}
                   </Text>
                 </View>
+              </View>
+            </Card.Content>
+          </Card>
+
+          {/* Notes memory: private notes the model can save to and search */}
+          <Card elevation={0} style={styles.card}>
+            <Card.Title title={l10n.settings.notesMemory.title} />
+            <Card.Content>
+              <View style={styles.settingItemContainer}>
+                <View style={styles.switchContainer}>
+                  <View style={styles.textContainer}>
+                    <Text variant="titleMedium" style={styles.textLabel}>
+                      {l10n.settings.notesMemory.enableLabel}
+                    </Text>
+                    <Text variant="labelSmall" style={styles.textDescription}>
+                      {l10n.settings.notesMemory.description}
+                    </Text>
+                  </View>
+                  <Switch
+                    testID="notes-memory-switch"
+                    accessibilityLabel={l10n.settings.notesMemory.enableLabel}
+                    value={notesStore.enabled}
+                    onValueChange={value => notesStore.setEnabled(value)}
+                  />
+                </View>
+                <Divider style={styles.divider} />
+                <Button
+                  testID="notes-clear-button"
+                  mode="outlined"
+                  onPress={() =>
+                    Alert.alert(
+                      l10n.settings.notesMemory.clearTitle,
+                      l10n.settings.notesMemory.clearMessage,
+                      [
+                        {text: l10n.common.cancel, style: 'cancel'},
+                        {
+                          text: l10n.settings.notesMemory.clearConfirm,
+                          style: 'destructive',
+                          onPress: async () => {
+                            const ok = await notesStore.clearAll();
+                            Alert.alert(
+                              l10n.settings.notesMemory.clearTitle,
+                              ok
+                                ? l10n.settings.notesMemory.clearDone
+                                : l10n.settings.notesMemory.clearFailed,
+                            );
+                          },
+                        },
+                      ],
+                    )
+                  }
+                  style={styles.menuButton}>
+                  {l10n.settings.notesMemory.clearButton}
+                </Button>
               </View>
             </Card.Content>
           </Card>
