@@ -6,7 +6,7 @@ import {
   SystemPromptContext,
 } from './types';
 import type {SearchAccess} from './searchAccess';
-import {SEARCH_NOT_SET_UP_MESSAGE} from './searchAccess';
+import {INTERNET_OFF_MESSAGE, SEARCH_NOT_SET_UP_MESSAGE} from './searchAccess';
 import type {SearchHit} from '../search/types';
 import {
   budgetHits,
@@ -18,6 +18,12 @@ import {wrapUntrusted} from './untrustedContent';
 import {allowReadUrls} from './readUrlAllowlist';
 
 const PER_SNIPPET_CHARS = 280;
+
+/**
+ * Keyword queries are short. A long one is the model pasting context into a
+ * request that leaves the device, so refuse it rather than send or truncate.
+ */
+export const MAX_QUERY_CHARS = 400;
 
 const inFlight = new Map<string, Promise<SearchHit[]>>();
 
@@ -63,11 +69,19 @@ export class WebSearchEngine implements TalentEngine {
       };
     }
 
+    if (query.length > MAX_QUERY_CHARS) {
+      const summary = `web_search: query is too long (max ${MAX_QUERY_CHARS} characters). Use a short keyword query of 2-6 words.`;
+      return {type: 'error', summary, errorMessage: summary};
+    }
+
     if (!this.access.canSearch()) {
+      const message = this.access.isInternetOn()
+        ? SEARCH_NOT_SET_UP_MESSAGE
+        : INTERNET_OFF_MESSAGE;
       return {
         type: 'error',
-        summary: `web_search: ${SEARCH_NOT_SET_UP_MESSAGE}`,
-        errorMessage: SEARCH_NOT_SET_UP_MESSAGE,
+        summary: `web_search: ${message}`,
+        errorMessage: message,
       };
     }
 

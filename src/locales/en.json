@@ -145,6 +145,8 @@
       "hideKeyAccessibilityLabel": "Hide API key",
       "resultCountLabel": "Results per search",
       "resultCountDescription": "Fewer results keep more room in the model's context.",
+      "maxToolCallsLabel": "Max tool calls per reply",
+      "maxToolCallsDescription": "Caps how many searches and page reads the model can run before it must answer. Lower is faster and uses less of your search quota.",
       "consentTitle": "Searches leave your device",
       "consentDescription": "When a Pal searches the web, your query is sent to the selected provider over the internet. When a Pal reads a page, the URL and page content may instead be sent to a default reader service (r.jina.ai) if the selected provider has no native reader. Keys and queries are never sent to PocketPal.",
       "consentAccept": "I understand",
@@ -665,6 +667,13 @@
         "thinkingDisabled": "Thinking mode disabled",
         "thinkText": "Think",
         "cycleEffort": "Reasoning effort: {{level}}. Double tap to cycle effort level"
+      },
+      "internetToggle": {
+        "label": "Web",
+        "enableInternet": "Turn on internet access",
+        "disableInternet": "Turn off internet access",
+        "stateOn": "Internet access on",
+        "stateOff": "Internet access off"
       }
     },
     "contentReportSheet": {
@@ -1276,6 +1285,7 @@
     "multimodalNotEnabled": "Multimodal is not enabled for this model. Images will be displayed but not processed by the AI.",
     "cannotSendWithoutModel": "Load a model first",
     "toolCompatWarning": "This model may not support tool calling. Results may be unreliable.",
+    "internetNotSetUp": "Internet access isn't set up yet. In Settings → Internet Search, accept the disclosure and add an API key, then turn it on here.",
     "softCapWarning": "Start a new chat for best performance.",
     "contextWarning": "This conversation is getting long and may soon run out of room.",
     "contextRemoteHedged": "This reply may have been cut off. Try sending again or shortening the request.",

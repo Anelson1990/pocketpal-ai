@@ -24,6 +24,7 @@ import {
   VideoRecorderIcon,
   PlusIcon,
   AtomIcon,
+  GlobeIcon,
 } from '../../assets/icons';
 
 import {useTheme, useVoiceCapture} from '../../hooks';
@@ -88,6 +89,12 @@ export interface ChatInputTopLevelProps {
   isThinkingEnabled?: boolean;
   /** Callback when thinking toggle is pressed */
   onThinkingToggle?: (enabled: boolean) => void;
+  /** Whether to show the internet access toggle */
+  showInternetToggle?: boolean;
+  /** Whether the model currently has internet access */
+  isInternetEnabled?: boolean;
+  /** Callback when the internet toggle is pressed */
+  onInternetToggle?: () => void;
   /** Append a voice transcript to the composer (never auto-sent). */
   appendTranscript?: (text: string) => void;
   /**
@@ -120,6 +127,12 @@ export interface ChatInputAdditionalProps {
   isThinkingEnabled?: boolean;
   /** Callback when thinking toggle is pressed */
   onThinkingToggle?: (enabled: boolean) => void;
+  /** Whether to show the internet access toggle */
+  showInternetToggle?: boolean;
+  /** Whether the model currently has internet access */
+  isInternetEnabled?: boolean;
+  /** Callback when the internet toggle is pressed */
+  onInternetToggle?: () => void;
   /** Whether the model supports graded reasoning effort (axis 2) */
   supportsEffort?: boolean;
   /** The graded effort value set, e.g. ['low','medium','high'] */
@@ -162,6 +175,9 @@ export const ChatInput = observer(
     showThinkingToggle = false,
     isThinkingEnabled = false,
     onThinkingToggle,
+    showInternetToggle = false,
+    isInternetEnabled = false,
+    onInternetToggle,
     appendTranscript,
     onVoicePress,
     supportsEffort = false,
@@ -688,6 +704,51 @@ export const ChatInput = observer(
                       {supportsEffort && isThinkingEnabled && reasoningEffort
                         ? localizedEffort
                         : l10n.components.chatInput.thinkingToggle.thinkText}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Internet Toggle. ON lets the model search the web and read
+                  pages; OFF keeps every lookup on-device. Not-set-up is handled
+                  by the owner of the callback (it explains how to enable). */}
+                {showInternetToggle && !isCameraActive && (
+                  <TouchableOpacity
+                    testID="internet-toggle"
+                    style={[
+                      styles.thinkingToggleLeft,
+                      isInternetEnabled && {backgroundColor: onSurfaceColor},
+                      {borderColor: onSurfaceColorVariant},
+                    ]}
+                    onPress={() => onInternetToggle?.()}
+                    accessibilityLabel={
+                      isInternetEnabled
+                        ? l10n.components.chatInput.internetToggle
+                            .disableInternet
+                        : l10n.components.chatInput.internetToggle
+                            .enableInternet
+                    }
+                    accessibilityRole="switch"
+                    accessibilityState={{checked: isInternetEnabled}}>
+                    <GlobeIcon
+                      width={14}
+                      height={14}
+                      stroke={
+                        isInternetEnabled
+                          ? inputBackgroundColor
+                          : onSurfaceColorVariant
+                      }
+                      strokeWidth={2}
+                    />
+                    <Text
+                      testID="internet-toggle-label"
+                      numberOfLines={1}
+                      style={[
+                        styles.thinkingToggleText,
+                        isInternetEnabled
+                          ? {color: inputBackgroundColor}
+                          : {color: onSurfaceColorVariant},
+                      ]}>
+                      {l10n.components.chatInput.internetToggle.label}
                     </Text>
                   </TouchableOpacity>
                 )}

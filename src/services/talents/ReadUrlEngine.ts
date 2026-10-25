@@ -5,7 +5,7 @@ import {
   ToolDefinition,
 } from './types';
 import type {SearchAccess} from './searchAccess';
-import {SEARCH_NOT_SET_UP_MESSAGE} from './searchAccess';
+import {INTERNET_OFF_MESSAGE, SEARCH_NOT_SET_UP_MESSAGE} from './searchAccess';
 import type {PageContent} from '../search/types';
 import {budgetPage} from '../search/searchBudget';
 import {wrapUntrusted} from './untrustedContent';
@@ -33,6 +33,9 @@ const isAllowedReadUrl = (raw: string): boolean => {
 
 const MAX_PAGE_LINKS = 100;
 
+/** Longest URL accepted from the model; anything bigger is data smuggling, not a page. */
+export const MAX_URL_CHARS = 2048;
+
 export class ReadUrlEngine implements TalentEngine {
   readonly name = 'read_url';
   readonly recommendedContextTokens = 1200;
@@ -52,16 +55,24 @@ export class ReadUrlEngine implements TalentEngine {
       };
     }
 
+    if (url.length > MAX_URL_CHARS) {
+      const summary = `read_url: URL is too long (max ${MAX_URL_CHARS} characters)`;
+      return {type: 'error', summary, errorMessage: summary};
+    }
+
     if (!isAllowedReadUrl(url)) {
       const summary = 'read_url: only http(s) URLs are allowed';
       return {type: 'error', summary, errorMessage: summary};
     }
 
     if (!this.access.canSearch()) {
+      const message = this.access.isInternetOn()
+        ? SEARCH_NOT_SET_UP_MESSAGE
+        : INTERNET_OFF_MESSAGE;
       return {
         type: 'error',
-        summary: `read_url: ${SEARCH_NOT_SET_UP_MESSAGE}`,
-        errorMessage: SEARCH_NOT_SET_UP_MESSAGE,
+        summary: `read_url: ${message}`,
+        errorMessage: message,
       };
     }
 

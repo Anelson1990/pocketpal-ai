@@ -24,6 +24,7 @@ const makeAccess = (overrides: Partial<SearchAccess> = {}): SearchAccess => {
   return {
     getActiveProvider: () => provider,
     canSearch: () => true,
+    isInternetOn: () => true,
     getResultCount: () => 3,
     readWithDefaultReader: jest.fn(),
     ...overrides,
