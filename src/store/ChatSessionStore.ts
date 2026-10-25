@@ -21,9 +21,11 @@ import {
   deriveToolSchemas,
   resolveTalentNames,
   stripInternetTools,
+  stripNotesTools,
 } from '../services/talents';
 import type {ToolDefinition} from '../services/talents/types';
 import {searchProviderStore} from './SearchProviderStore';
+import {notesStore} from './NotesStore';
 import {AgentUiState, initialAgentUiState} from '../services/agent';
 
 /**
@@ -1543,9 +1545,11 @@ class ChatSessionStore {
     // web_search/read_url when the chat's Internet toggle is on — for any chat,
     // with or without a Pal. The toggle also removes a Pal's own internet talents.
     const internetOn = searchProviderStore.canSearch;
+    const notesOn = notesStore.enabled;
     const talentNames = resolveTalentNames(
       pal?.pact?.talents?.map(t => t.name) ?? [],
       internetOn,
+      notesOn,
     );
     if (talentNames.length > 0) {
       const tools = deriveToolSchemas(talentNames);
@@ -1594,9 +1598,12 @@ class ChatSessionStore {
     // OFF means OFF whatever layer the tools came from: a session saved while
     // the toggle was on keeps its `tools` in custom settings, and an older Pal
     // may carry its own. Strip internet tools that survived to this point.
-    const gatedTools = stripInternetTools(
-      resolvedSettings.tools as ToolDefinition[] | undefined,
-      internetOn,
+    const gatedTools = stripNotesTools(
+      stripInternetTools(
+        resolvedSettings.tools as ToolDefinition[] | undefined,
+        internetOn,
+      ),
+      notesOn,
     );
     if (gatedTools !== resolvedSettings.tools) {
       const next = {...resolvedSettings};

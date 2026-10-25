@@ -67,6 +67,7 @@ import {
   mockVoiceModeStore,
 } from '../__mocks__/stores/voiceModeStore';
 import {mockSearchProviderStore} from '../__mocks__/stores/searchProviderStore';
+import {mockNotesStore} from '../__mocks__/stores/notesStore';
 import {mockPurchaseStore} from '../__mocks__/stores/purchaseStore';
 
 jest.mock('@react-native-clipboard/clipboard', () => mockClipboard);
@@ -140,6 +141,7 @@ jest.mock('../src/store', () => {
     voiceModeStore: mockVoiceModeStore,
     voiceEntitlement: mockVoiceEntitlement,
     searchProviderStore: mockSearchProviderStore,
+    notesStore: mockNotesStore,
     purchaseStore: mockPurchaseStore,
     defaultCompletionSettings: mockDefaultCompletionSettings,
     NEW_SESSION_TITLE: 'New Session',

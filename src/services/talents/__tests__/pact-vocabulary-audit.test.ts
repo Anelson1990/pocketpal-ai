@@ -126,7 +126,7 @@ describe('PACT vocabulary audit', () => {
 
     it('returns ToolDefinition array for all registered engines', () => {
       const schemas = deriveToolSchemas();
-      expect(schemas).toHaveLength(5);
+      expect(schemas).toHaveLength(8);
       const names = schemas.map(s => s.function.name);
       expect(names).toContain('render_html');
       expect(names).toContain('calculate');
@@ -140,7 +140,7 @@ describe('PACT vocabulary audit', () => {
       // registerDefaultTalents internally.
       expect(talentRegistry.has('render_html')).toBe(false);
       const schemas = deriveToolSchemas();
-      expect(schemas).toHaveLength(5);
+      expect(schemas).toHaveLength(8);
       expect(talentRegistry.has('render_html')).toBe(true);
     });
   });
